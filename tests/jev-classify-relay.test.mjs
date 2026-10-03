@@ -148,6 +148,15 @@ describe('fetchJevLabel', () => {
     assert.deepEqual(Object.keys(JSON.parse(seen.init.body).questions), ['l0'], 'one question: 618 tokens, not 1,030');
   });
 
+  it('posts to the endpoint it is given', async () => {
+    let seen;
+    await fetchJevLabel('Strike on port', 200, {
+      apiKey: 'k', endpoint: 'http://127.0.0.1:8766/v1/systemone',
+      fetchFn: async (url) => { seen = url; return respond(200, okBody); },
+    });
+    assert.equal(seen, 'http://127.0.0.1:8766/v1/systemone');
+  });
+
   it('returns null on a network error, a non-retryable status, and an unparseable body', async () => {
     assert.equal(await fetchJevLabel('t', 200, { apiKey: 'k', fetchFn: async () => { throw new Error('x'); } }), null);
     assert.equal(await fetchJevLabel('t', 200, { apiKey: 'k', fetchFn: async () => respond(401, {}) }), null);

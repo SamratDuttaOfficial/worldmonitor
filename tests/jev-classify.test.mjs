@@ -1,8 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  JEV_MODEL, THREAT_LEVELS, THREAT_CATEGORIES, LEVEL_CRITERIA, CATEGORY_CRITERIA,
-  buildJevRequest, parseJevAnswers, sanitizeHeadline, hasNonLatinLetters,
+  JEV_ENDPOINT, JEV_MODEL, THREAT_LEVELS, THREAT_CATEGORIES, LEVEL_CRITERIA, CATEGORY_CRITERIA,
+  buildJevRequest, jevEndpoint, parseJevAnswers, sanitizeHeadline, hasNonLatinLetters,
 } from '../shared/jev-classify.js';
 
 const choice = (value, confidence, probabilities = { [value]: confidence }) => ({ type: 'choice', choice: value, confidence, probabilities });
@@ -15,6 +15,14 @@ describe('jev-classify criteria', () => {
 
   it('pins a model version, never the moving alias', () => {
     assert.match(JEV_MODEL, /^jev-\d+\.\d+\.\d+$/);
+  });
+});
+
+describe('jevEndpoint', () => {
+  it('is api.typesafe.ai unless TYPESAFE_BASE_URL is set', () => {
+    assert.equal(jevEndpoint({}), JEV_ENDPOINT);
+    assert.equal(jevEndpoint({ TYPESAFE_BASE_URL: '  ' }), JEV_ENDPOINT);
+    assert.equal(jevEndpoint({ TYPESAFE_BASE_URL: 'http://127.0.0.1:8766/' }), 'http://127.0.0.1:8766/v1/systemone');
   });
 });
 

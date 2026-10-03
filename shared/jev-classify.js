@@ -11,6 +11,14 @@
 export const JEV_MODEL = 'jev-1.13.0';
 export const JEV_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 
+// TYPESAFE_BASE_URL is the variable TypeSafe's own SDK reads: the host only, no
+// path. Set, the calls go to another System One host (a proxy, or a self-hosted
+// Jev-compatible model) instead of api.typesafe.ai.
+export function jevEndpoint(env) {
+  const base = typeof env?.TYPESAFE_BASE_URL === 'string' ? env.TYPESAFE_BASE_URL.trim() : '';
+  return base ? `${base.replace(/\/+$/, '')}/v1/systemone` : JEV_ENDPOINT;
+}
+
 export const THREAT_LEVELS = ['critical', 'high', 'medium', 'low', 'info'];
 export const THREAT_CATEGORIES = [
   'conflict', 'protest', 'disaster', 'diplomatic', 'economic',
