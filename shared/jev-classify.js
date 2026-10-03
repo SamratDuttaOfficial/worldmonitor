@@ -16,7 +16,19 @@ export const JEV_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
 // Jev-compatible model) instead of api.typesafe.ai.
 export function jevEndpoint(env) {
   const base = typeof env?.TYPESAFE_BASE_URL === 'string' ? env.TYPESAFE_BASE_URL.trim() : '';
-  return base ? `${base.replace(/\/+$/, '')}/v1/systemone` : JEV_ENDPOINT;
+  return base ? checkJevEndpoint(`${base.replace(/\/+$/, '')}/v1/systemone`) : JEV_ENDPOINT;
+}
+
+// Every call carries the API key as a bearer token, so plain http is only
+// accepted when the server is on this machine.
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+export function checkJevEndpoint(endpoint) {
+  const url = new URL(endpoint);
+  if (url.protocol === 'https:' || (url.protocol === 'http:' && LOOPBACK_HOSTS.has(url.hostname))) {
+    return endpoint;
+  }
+  throw new Error(`Jev endpoint must use https (plain http only for localhost): ${url.origin}`);
 }
 
 export const THREAT_LEVELS = ['critical', 'high', 'medium', 'low', 'info'];

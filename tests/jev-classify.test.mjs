@@ -24,6 +24,14 @@ describe('jevEndpoint', () => {
     assert.equal(jevEndpoint({ TYPESAFE_BASE_URL: '  ' }), JEV_ENDPOINT);
     assert.equal(jevEndpoint({ TYPESAFE_BASE_URL: 'http://127.0.0.1:8766/' }), 'http://127.0.0.1:8766/v1/systemone');
   });
+
+  it('refuses plain http unless the host is this machine', () => {
+    assert.equal(jevEndpoint({ TYPESAFE_BASE_URL: 'https://jev.example.com' }), 'https://jev.example.com/v1/systemone');
+    assert.equal(jevEndpoint({ TYPESAFE_BASE_URL: 'http://localhost:8766' }), 'http://localhost:8766/v1/systemone');
+    assert.equal(jevEndpoint({ TYPESAFE_BASE_URL: 'http://[::1]:8766' }), 'http://[::1]:8766/v1/systemone');
+    assert.throws(() => jevEndpoint({ TYPESAFE_BASE_URL: 'http://jev.example.com' }), /must use https/);
+    assert.throws(() => jevEndpoint({ TYPESAFE_BASE_URL: 'not a url' }));
+  });
 });
 
 describe('buildJevRequest', () => {

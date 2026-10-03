@@ -24,7 +24,7 @@
 // Lives outside ais-relay.cjs because the relay boots a live server on
 // require, so nothing inside it can be unit-tested.
 
-const { jevEndpoint, buildJevRequest, parseJevAnswers, hasNonLatinLetters } = require('../../shared/jev-classify.js');
+const { jevEndpoint, checkJevEndpoint, buildJevRequest, parseJevAnswers, hasNonLatinLetters } = require('../../shared/jev-classify.js');
 
 const SHADOW_LOG_KEY = 'classify:jev-shadow:v1';
 // Newest-first, trimmed on every push. ~30% of headlines disagree on level, so
@@ -49,13 +49,14 @@ const JEV_USER_AGENT = 'WorldMonitor-Relay/1.0';
 const jevApiKey = (env = process.env) => (typeof env.TYPESAFE_API_KEY === 'string' ? env.TYPESAFE_API_KEY.trim() : '');
 
 async function fetchJevLabel(title, maxTextChars, {
-  apiKey, endpoint = jevEndpoint(process.env), fetchFn = fetch, timeoutMs = JEV_TIMEOUT_MS, retryDelayMs = 1000,
+  apiKey, endpoint, fetchFn = fetch, timeoutMs = JEV_TIMEOUT_MS, retryDelayMs = 1000,
 } = {}) {
   const body = JSON.stringify(buildJevRequest([title], { maxTextChars, levelOnly: true }));
   for (let attempt = 0; attempt < 2; attempt++) {
     let resp;
     try {
-      resp = await fetchFn(endpoint, {
+      // An insecure remote endpoint throws here, before the key is sent.
+      resp = await fetchFn(endpoint ? checkJevEndpoint(endpoint) : jevEndpoint(process.env), {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'User-Agent': JEV_USER_AGENT },
         body,
