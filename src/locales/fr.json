@@ -16,7 +16,7 @@
     "predictionMarkets": "Marchés de prédiction",
     "loadingMarkets": "Chargement des marchés...",
     "infrastructure": "Exposition infrastructure",
-    "briefUnavailable": "Brief IA indisponible — configurez GROQ_API_KEY dans les paramètres.",
+    "briefUnavailable": "Brief IA indisponible — configurez OPENROUTER_API_KEY dans les paramètres.",
     "cached": "En cache",
     "fresh": "Frais",
     "noMarkets": "Aucun marché trouvé",
@@ -86,6 +86,7 @@
       "suppliers": "Arms suppliers ({{start}}–{{end}})",
       "source": "Sources: World Bank and SIPRI Arms Transfers Database. TIV measures transfer volume, not financial value.",
       "sourceWorldBank": "Source: World Bank.",
+      "snapshotAssembled": "Instantané {{source}} assemblé le {{time}}",
       "unavailable": "Not available",
       "coverage": "Mapped coverage",
       "supplierRetained": "Supplier data retained from the last successful importer refresh."
@@ -125,6 +126,7 @@
       "doNotTravel": "Ne pas voyager",
       "reconsiderTravel": "Reconsidérer le voyage",
       "exerciseCaution": "Faire preuve de prudence",
+      "normalPrecautions": "Précautions habituelles",
       "advisory": "Avis",
       "activeSirens": "Sirènes actives",
       "sirens24h": "Sirènes / 24h",
@@ -801,7 +803,7 @@
       "fresh": "Frais",
       "noMarkets": "Aucun marché de prédiction trouvé",
       "predictionMarkets": "Marchés de Prédiction",
-      "unavailable": "Briefing IA indisponible — configurez GROQ_API_KEY dans les Paramètres."
+      "unavailable": "Briefing IA indisponible — configurez OPENROUTER_API_KEY dans les Paramètres."
     },
     "countryBrief": {
       "components": {
@@ -837,7 +839,7 @@
       "predictionMarkets": "Marchés de prédiction",
       "loadingMarkets": "Chargement des marchés de prédiction...",
       "infrastructure": "Exposition aux infrastructures",
-      "briefUnavailable": "Brief AI indisponible – configurez GROQ_API_KEY dans Paramètres.",
+      "briefUnavailable": "Brief AI indisponible – configurez OPENROUTER_API_KEY dans Paramètres.",
       "cached": "En cache",
       "fresh": "Récent",
       "noMarkets": "Aucun marché de prédiction trouvé",
@@ -1378,7 +1380,7 @@
     },
     "insights": {
       "noStories": "Aucune info de dernière minute pour l'instant",
-      "infoTooltip": "<strong>Analyse basée sur l'IA</strong><br>• <strong>World Brief</strong> : résumé de l'IA (Groq/OpenRouter)<br>• <strong>Sentiment</strong> : analyse du ton de l'actualité<br>• <strong>Velocity</strong> : histoires rapides<br>• <strong>Focal Points</strong> : corrèle les entités d'information avec les signaux cartographiques (militaires, manifestations, pannes)<br><em>ordinateur de bureau uniquement • Optimisé par Llama 3.3 + détection de point focal</em>",
+      "infoTooltip": "<strong>Analyse basée sur l'IA</strong><br>• <strong>World Brief</strong> : résumé de l'IA (OpenRouter)<br>• <strong>Sentiment</strong> : analyse du ton de l'actualité<br>• <strong>Velocity</strong> : histoires rapides<br>• <strong>Focal Points</strong> : corrèle les entités d'information avec les signaux cartographiques (militaires, manifestations, pannes)<br><em>ordinateur de bureau uniquement • Optimisé par Llama 3.3 + détection de point focal</em>",
       "step": "Step {{step}}/{{total}}",
       "waitingForData": "Attente des données d'actualités...",
       "rankingStories": "Classement des histoires importantes...",
@@ -1386,7 +1388,7 @@
       "generatingBrief": "Génération du brief mondial...",
       "mapFlashLabel": "Pulse événement en direct",
       "mapFlashDesc": "Faire clignoter les lieux sur la carte lors d'une alerte info",
-      "aiFlowCloudLabel": "IA Cloud (Groq & OpenRouter)",
+      "aiFlowCloudLabel": "IA Cloud (OpenRouter)",
       "aiFlowCloudDesc": "Envoyer les titres au cloud pour le résumé IA (recommandé)",
       "aiFlowBrowserLabel": "Modèle local du navigateur",
       "aiFlowBrowserDesc": "Exécuter l'IA localement dans votre navigateur",
@@ -2343,7 +2345,7 @@
       }
     },
     "marketImplications": {
-      "infoTooltip": "<strong>Implications du marché IA</strong> Signaux commerciaux générés par LLM découlant de l'état géopolitique, des matières premières et des données macro en direct après chaque cycle de prévision.<ul><li><strong>Direction</strong> : LONG / SHORT / HEDGE avec notation de confiance</li><li><strong>Horizon temporel</strong> : 1S, 2S, 1M ou 3M</li><li><strong>Moteur</strong> : Catalyseur clé derrière le signal</li><li><strong>Risque</strong> : Réserve ou condition d'invalidation</li></ul><em>À titre informatif uniquement. Ne constitue pas un conseil en investissement.</em>",
+      "infoTooltip": "<strong>Implications du marché IA</strong> Signaux commerciaux générés par LLM découlant de l'état géopolitique, des matières premières et des données macro en direct après chaque cycle de prévision.<ul><li><strong>Direction</strong> : LONG / SHORT / HEDGE</li><li><strong>Horizon temporel</strong> : 1S, 2S, 1M ou 3M</li><li><strong>Moteur</strong> : Catalyseur clé derrière le signal</li><li><strong>Risque</strong> : Réserve ou condition d'invalidation</li></ul><em>À titre informatif uniquement. Ne constitue pas un conseil en investissement.</em>",
       "title": "Implications du marché IA",
       "directions": {
         "long": "LONG",
@@ -2357,10 +2359,72 @@
       "signals_other": "{{count}} signaux",
       "disclaimer": "Signaux de trading générés par l'IA à titre informatif uniquement. Ne constitue pas un conseil en investissement. Effectuez toujours vos propres recherches.",
       "unavailable": "Les implications du marché IA sont générées après chaque exécution de prévision. Veuillez revenir bientôt.",
-      "signals_many": "{{count}} signaux"
+      "signals_many": "{{count}} signaux",
+      "unscored": "Scénarios narratifs, non évalués pour leur exactitude."
     },
     "forecast": {
-      "infoTooltip": "<strong>Prévisions IA</strong> Estimations de probabilité générées par IA pour les événements géopolitiques et économiques :<ul><li>Couverture multi-domaines : conflits, marchés, chaîne d'approvisionnement, cyber, politique</li><li>Chaque prévision affiche la probabilité estimée, le niveau de confiance et l'horizon temporel</li><li>Étalonnée par rapport aux bases de référence des marchés prédictifs le cas échéant</li></ul>Les prévisions se mettent à jour à l'arrivée de nouveaux signaux d'intelligence. Filtrez par domaine à l'aide des onglets ci-dessus."
+      "infoTooltip": "<strong>Prévisions IA</strong> Estimations de probabilité générées par IA pour les événements géopolitiques et économiques :<ul><li>Couverture multi-domaines : conflits, marchés, chaîne d'approvisionnement, cyber, politique</li><li>Chaque prévision affiche la probabilité estimée, le niveau de confiance et l'horizon temporel</li></ul>Les prévisions se mettent à jour à l'arrivée de nouveaux signaux d'intelligence. Filtrez par domaine à l'aide des onglets ci-dessus.",
+      "record": {
+        "label": "Bilan",
+        "labelHint": "Comment les prévisions publiées ont été notées une fois résolues, sur les {{days}} derniers jours. Survolez un chiffre pour en connaître le sens.",
+        "unavailable": "Indisponible pour le moment",
+        "insufficient": "Pas encore assez de prévisions notées",
+        "brier": "Score de Brier {{score}} (n={{n}})",
+        "brierHint": "Score de Brier sur {{n}} prévisions notées : la moyenne du carré de l'écart entre la probabilité prévue et ce qui s'est produit. 0 est parfait, 0,25 équivaut à un pile ou face ; plus c'est bas, mieux c'est.",
+        "baseRate": "Taux de base {{score}} (n={{n}})",
+        "baseRateHint": "Ce qu'aurait obtenu quelqu'un répondant toujours le taux de « oui » observé sur les mêmes {{n}} prévisions ({{pct}} % résolues par « oui »). Faire mieux signifie que les prévisions apportent de l'information.",
+        "void": "Annulées {{pct}} % ({{count}} sur {{resolved}})",
+        "voidHint": "Prévisions résolues mais impossibles à noter, sur {{resolved}} résolues dans la période.",
+        "stale": "Obsolète",
+        "staleHint": "Dernière notation le {{date}}. Le noteur n'a pas tourné depuis, ces chiffres sont donc plus anciens qu'ils ne devraient l'être.",
+        "fullRecord": "Bilan complet"
+      },
+      "reliability": {
+        "measured": "{{domain}} n={{n}} · Brier {{score}} vs taux de base {{base}}",
+        "measuredHint": "Score obtenu par les prévisions publiées {{domain}} sur {{n}} prévisions évaluées au cours des {{days}} derniers jours. Le taux de base est le score qu'on obtiendrait en répondant toujours par le taux de oui observé du domaine. Plus bas est mieux. C'est l'historique du domaine, pas de cette prévision.",
+        "unmeasured": "Pas encore mesuré",
+        "unmeasuredHint": "Les prévisions {{domain}} ont {{n}} résultats évalués au cours des {{days}} derniers jours. Un domaine doit en avoir {{min}} avant que sa précision soit affichée."
+      },
+      "resolution": {
+        "last": "Dernier : {{outcome}}",
+        "lastSr": "La fenêtre précédente de cette prévision a abouti à {{outcome}}.",
+        "history": "Fenêtres récentes, les plus récentes en premier : {{list}}",
+        "outcome": {
+          "yes": "OUI",
+          "no": "NON",
+          "void": "NUL"
+        },
+        "void": {
+          "no_establishable_metric": "Le flux n'avait pas de lecture pour cette question",
+          "value_source_never_settled": "Le flux n'a jamais publié de valeur définitive",
+          "count_source_window_not_retained": "Le flux ne conservait plus la fenêtre de la question",
+          "unsupported_window": "La question n'a pas pu être vérifiée par rapport à son flux",
+          "unsupported_metric_key": "La question n'a pas pu être vérifiée par rapport à son flux",
+          "not_hard_spec": "La question n'a pas pu être vérifiée par rapport à son flux",
+          "missing_threshold": "Il manquait un seuil à la question",
+          "missing_deadline": "Il manquait une date limite à la question",
+          "missing_generated_at": "Il manquait la date de début de la prévision",
+          "beyond_archive_horizon": "L'archive de nouvelles ne couvrait plus la fenêtre de la question",
+          "no_archive_evidence": "L'archive de nouvelles n'avait rien sur le sujet",
+          "all_judges_void": "Les deux arbitres ont jugé les preuves insuffisantes",
+          "judge_disagreement": "Les arbitres n'étaient pas d'accord",
+          "judge_retry_exhausted": "Les arbitres n'ont rendu aucun verdict",
+          "withheld_unpublished": "Ce type de prévision n'est plus publié",
+          "resolver_envelope_bug": "Évalué sur un flux de données que nous ne pouvions pas lire correctement",
+          "market_price_not_outcome": "Le flux indiquait le prix du marché, pas la manière dont le marché a été résolu",
+          "judged_evidence_unreliable": "Exclu de la notation le temps de corriger les éléments fournis aux juges",
+          "other": "N'a pas pu être résolu"
+        }
+      },
+      "horizons": {
+        "label": "Également noté à : {{list}}",
+        "hint": "La probabilité du titre est notée à l'horizon propre de la prévision. La projection à chacun de ces horizons est également notée, par rapport à son feed source, en utilisant la valeur publiée en premier pour cette prévision. Les valeurs de projection ne sont pas affichées car la valeur actuelle peut différer de celle notée."
+      },
+      "audit": {
+        "label": "Précision en cours d'audit",
+        "hint": "En cours d'audit depuis le {{date}}. Un audit a révélé des erreurs dans la notation des prévisions. Les scores sont retirés pendant que les corrections sont apportées. Les prévisions continuent d'être publiées et enregistrées.",
+        "unverified": "Résultat enregistré, non vérifié tant que la précision est en cours d'audit."
+      }
     },
     "escalationCorrelation": {
       "infoTooltip": "<strong>Moniteur d'escalade</strong> Détecte les signaux géopolitiques convergents :<ul><li>Corrélie les mouvements militaires, les événements conflictuels et les pics d'actualités</li><li>Note les zones de convergence par gravité (critique/haute/moyenne/basse)</li><li>Suit les tendances d'escalade ou de désescalade au fil du temps</li></ul>Cliquez sur une carte pour zoomer sur la région sur la carte."
@@ -3374,8 +3438,8 @@
   "signals": {
     "context": {
       "prediction_leads_news": {
-        "whyItMatters": "Les marchés prédictifs intègrent souvent l'information avant qu'elle ne devienne une actualité — les traders peuvent avoir un accès anticipé aux développements.",
-        "actionableInsight": "Surveiller les breaking news dans les 1 à 6 heures qui pourraient expliquer le mouvement de marché.",
+        "whyItMatters": "Un marché de prédiction a bougé alors que la couverture médiatique du sujet restait faible — le marché réagit peut-être à des informations qui n'ont pas encore été rapportées.",
+        "actionableInsight": "Surveillez les informations de dernière minute qui pourraient expliquer le mouvement du marché.",
         "confidenceNote": "Confiance plus élevée si plusieurs marchés prédictifs évoluent dans la même direction."
       },
       "news_leads_markets": {

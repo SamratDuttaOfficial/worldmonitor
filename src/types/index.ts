@@ -106,6 +106,16 @@ export interface StoryMeta {
 }
 
 
+export interface NewsLocationMarker {
+  lat: number;
+  lon: number;
+  title: string;
+  threatLevel: string;
+  timestamp?: Date;
+  /** Original loaded article identity; marker titles may include inferred locations. */
+  article?: Pick<NewsItem, 'link' | 'title' | 'source'>;
+}
+
 export interface NewsItem {
   source: string;
   title: string;
@@ -1614,3 +1624,5 @@ export interface CountryBriefSignals {
   sanctionsDesignations: number;
   sanctionsNewDesignations: number;
 }
+
+export type CountrySignalCounts = { [K in keyof CountryBriefSignals]: CountryBriefSignals[K] | null };

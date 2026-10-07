@@ -1172,7 +1172,7 @@ any red check anywhere strands this service's builds.
 | **Watch paths** | See `scripts/railway-services.json` (exact runtime closure; run `node scripts/audit-railway-watch-paths.mjs`) |
 | **Replaces** | 2 services |
 | **Net savings** | 1 slot |
-| **Members** | Correlation (5min), Cross-Source Signals (15min), Cross-Strait Activity (3h), China Decision Signals (15min), Regional Snapshots (6h) |
+| **Members** | Correlation (5min), Market-Alert-Ledger (5min), Cross-Source Signals (15min), Cross-Strait Activity (3h), China Decision Signals (15min), Regional Snapshots (6h) |
 | **Required env** | `JAPAN_MOD_PROXY_URL` or `PROXY_URL` (Cross-Strait Activity's Japan MOD exit; the section declares an any-of group, so either satisfies it and only an environment with neither fails as `CONFIG_ERROR`) |
 | **Note** | Cross-Strait Activity is the only direct external-source member; it uses bounded MND/Japan MOD requests and a 3h freshness gate. China Decision Signals validates and republishes the bounded public composition after reading its domain lanes. Other members are Redis-derived. The bundle enforces a 570s wall-time admission budget so a non-fitting due section defers before Railway's 10-minute container limit. |
 
@@ -1362,6 +1362,12 @@ Recovery is accepted only when:
 | **Members** | Climate News (30min), USA Spending (hourly), Global Tenders (hourly), UCDP Events (6h), WB Indicators (daily) |
 | **Note** | Existing members are backups for ais-relay inline loops/child spawns; Global Tenders is hosted directly in this bundle. Each seed's freshness gate skips when the canonical data is already fresh. |
 
+The World Bank catalogue uses `IP.TMK.RSCT` and `IP.TMK.NRCT` for resident
+and nonresident trademark application counts. `IP.TMK.TOTL` is archived and
+the standard indicator endpoint rejects it. The two current series keep their
+own codes and observation years. They are not aliases for the archived total.
+Both snapshots must pass the same coverage check as the other catalogue entries.
+
 ### Bundle 12: seed-bundle-yield-curves
 
 | Setting | Value |
@@ -1380,6 +1386,29 @@ Recovery is accepted only when:
 | **Note** | Serves GetGovernmentYieldCurve (`/api/economic/v1/get-government-yield-curve`). Split from seed-bundle-macro because that bundle's 570s budget is already saturated by 22 sections. GB refreshes the 39 MB BoE archive on cold start and month rollover to recover missed month-end observations; other daily runs merge the ~370 KB current-month zip into accumulated history. SE paces its four SWEA requests (2s gaps plus Retry-After-honoring backoff) because the API throttles bursts with escalating 429s. Every market publishes per-year shards plus a `:latest` key; the OECD fallback is monthly and covers markets without a daily fitted curve. |
 
 ---
+
+### Australian yield fallback
+
+The daily bundle remains the primary AU producer. The `ais-relay` service also
+checks `seed-meta:economic:yield-curve-au` every six hours. It runs the same
+`seed-yield-curve-au.mjs` only when the publication is at least 24 hours old,
+the newest curve is at least ten days old, or either clock is missing or invalid.
+Suppression also requires a completion marker that matches the canonical
+publication and was written after its freshness metadata. An incomplete run
+remains eligible even when both clocks are recent.
+
+This second request path addresses the RBA HTTP 403 responses observed in the
+yield bundle on October 1 to 3, 2026. Read-only RBA requests succeeded from the
+US-East relay. The upstream rejection policy is unknown; both paths can still
+fail. The fallback uses the existing seeder validation, shared economic lock,
+canonical payload, latest/year shards, and bundle completion marker. Failed
+fetches preserve the previous data and freshness clocks.
+
+The relay image and its registry watch paths must include the AU seeder and its
+import graph. After deploying the relay change, verify `[AuYieldFallback]`
+execution, matching canonical/latest/year data, a newer seed heartbeat, and
+the public AU health verdict. A healthy response after a manual seed is not
+proof that this scheduled fallback has run.
 
 ## Registry-covered live resilience services
 

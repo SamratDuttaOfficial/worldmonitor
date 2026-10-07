@@ -2,22 +2,39 @@ import { test, expect, type Page } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import us from './fixtures/country-brief-us.json' with { type: 'json' };
+import { readCountryView } from '../api/mcp/ui/news-dashboard-app';
+import { assembleRawSignals, failedRawSignal, validateRawSignal, RAW_SIGNAL_FAMILIES, type RawSignalsValue } from '../shared/country-raw-signals';
+import type { CountrySignalCounts } from '../src/types';
+import { buildDefenseIndustrialResponse } from '../shared/defense-industrial-response';
 
 const root = process.cwd();
 test.use({ serviceWorkers: 'block' });
 
 type HostCall = { name: string; arguments: Record<string, unknown> };
-async function installCountryHost(page: Page, fullExposure = false, initialOpenError?: string, atlasFixture = false, atlasOutages: { energy?: boolean; timeline?: boolean } = {}) {
+async function installCountryHost(page: Page, fullExposure = false, initialOpenError?: string, atlasFixture = false, atlasOutages: { energy?: boolean; timeline?: boolean } = {}, cachedShell?: string, rawScenario?: 'military-first' | 'raw-first', geometryUnavailable = false, defenseClockFixture = false) {
   const calls: HostCall[] = [];
   const requestNames = new Map<number, string>();
   const cancelled: string[] = [];
   let delayCoverage = false;
   let releaseCoverage: () => void = () => {};
   const coverageDelayed = new Promise<void>(resolve => { releaseCoverage = resolve; });
-  const contexts: Array<{ countryCode: string; topic: string; sections: Array<{ section: string; state: string; coverage?: string; renderedText: string }> }> = [];
+  const contexts: Array<{ countryCode: string; topic: string; signals?: CountrySignalCounts; sections: Array<{ section: string; state: string; coverage?: string; renderedText: string }> }> = [];
   const links: string[] = [];
+  let rawMode: 'observed' | 'transient' | 'denied' | 'zero' = 'observed';
+  let rawAdvisoryLevel = 'normal';
+  let admissionFailure: string | undefined;
+  let delayRaw = false;
+  let releaseRaw: () => void = () => {};
+  const delayedRaw = new Promise<void>(resolve => { releaseRaw = resolve; });
+  let rawCompleted = 0;
+  let rawRetrievedAt = '2026-10-05T12:00:00.000Z';
+  let releaseOrder: () => void = () => {};
+  let delayOrder = Boolean(rawScenario);
+  const orderedCompletion = new Promise<void>(resolve => { releaseOrder = () => { delayOrder = false; resolve(); }; });
   let failFacts = false;
+  let factsDenied = false;
   let failActivity = false;
+  let denyActivity = false;
   let atlasDenied = false;
   let atlasUnavailable = false;
   let disruptionsFailed = false;
@@ -32,6 +49,7 @@ async function installCountryHost(page: Page, fullExposure = false, initialOpenE
   let quotaExceeded = false;
   let admissions = 0;
   const admitted = new Set<string>();
+  const panelCountries = new Map<string, string>();
   let delayUS = false;
   let delayAdmission = false;
   let releaseAdmission: () => void = () => {};
@@ -41,10 +59,11 @@ async function installCountryHost(page: Page, fullExposure = false, initialOpenE
   const unmanaged: string[] = [];
   page.on('request', request => { if (request.url().includes('/api/')) unmanaged.push(request.url()); });
   await page.route('**/plugin/assets/**', async route => {
+    if (route.request().url().endsWith('/country-removed.js')) return route.fulfill({ status: 404, contentType: 'text/html', body: 'Removed build asset', headers: { 'Access-Control-Allow-Origin': '*' } });
     const file = join(root, 'dist/plugin/assets', new URL(route.request().url()).pathname.split('/').at(-1)!);
-    await route.fulfill({ path: file });
+    await route.fulfill({ path: file, headers: { 'Access-Control-Allow-Origin': '*' } });
   });
-  await page.route('**/data/*.geojson', async route => route.fulfill({ path: join(root, 'public/data', new URL(route.request().url()).pathname.split('/').at(-1)!), headers: { 'Access-Control-Allow-Origin': '*' } }));
+  await page.route('**/data/*.geojson', async route => geometryUnavailable ? route.fulfill({ status: 503, body: 'Controlled geometry failure', headers: { 'Access-Control-Allow-Origin': '*' } }) : route.fulfill({ path: join(root, 'public/data', new URL(route.request().url()).pathname.split('/').at(-1)!), headers: { 'Access-Control-Allow-Origin': '*' } }));
   await page.route('**/country-host-test', route => route.fulfill({ contentType: 'text/html', body: '<!doctype html><meta charset="utf-8"><title>Country plugin acceptance — controlled fixtures</title><h1>Country plugin acceptance — controlled fixtures</h1><p>Tests the built iframe and host transport. Does not test live OAuth or source freshness.</p><iframe title="WorldMonitor country view" sandbox="allow-scripts allow-downloads" style="width:100%;height:950px;border:0"></iframe>' }));
   await page.exposeFunction('countryHost', async (method: string, params: HostCall & { content?: Array<{ text: string }>; url?: string; requestId?: number }, id?: number) => {
     if (method === 'notifications/cancelled') { cancelled.push(requestNames.get(params.requestId!) ?? 'unknown'); return {}; }
@@ -55,22 +74,42 @@ async function installCountryHost(page: Page, fullExposure = false, initialOpenE
     calls.push(params);
     if (id !== undefined) requestNames.set(id, params.name);
     const args = params.arguments;
-    const code = String(args.country_code ?? (args.arguments as Record<string, unknown>)?.country_code ?? (args.arguments as Record<string, unknown>)?.countryCode ?? 'US');
+    const code = String(args.country_code ?? (args.arguments as Record<string, unknown>)?.country_code ?? (args.arguments as Record<string, unknown>)?.countryCode ?? panelCountries.get(String(args.panel_request ?? '')) ?? 'US');
     if (params.name === 'get_country_brief') return { structuredContent: { ...us.brief, countryCode: code, brief: `Controlled ${code} assessment. Source observations, not live acceptance.` } };
     if (params.name === 'get_country_coverage' && delayCoverage) await coverageDelayed;
     if (params.name === 'get_country_coverage') return { structuredContent: { countryCode: code, countryName: code, generatedAt: '2026-10-01T15:00:00Z', degraded: false, headlines: [{ title: `Controlled ${code} source article`, source: 'Fixture publisher', url: 'https://example.com/evidence', publishedAtMs: 1790863200000 }], events: [], sources: [{ source: 'news', state: 'ready' }, { source: 'events', state: 'unavailable' }] } };
     if (params.name === 'open_country_brief') {
       if (initialOpenError) return { isError: true, content: [{ type: 'text', text: initialOpenError }] };
+      if (admissionFailure) return { isError: true, content: [{ type: 'text', text: admissionFailure }] };
       if (code === 'US' && delayAdmission) await admissionDelayed;
       if (quotaExceeded) throw new Error('Daily MCP quota exceeded (50 requests/day). Resets at next UTC midnight.');
       const reused = admitted.has(code) && !args.refresh;
       if (!reused) admissions++;
       admitted.add(code);
-      return { structuredContent: { countryCode: code, topic: args.topic ?? 'overview', panelRequest: { token: `${code}.controlled-admission-${admissions}`, countryCode: code, expiresAt: new Date(Date.now() + 300000).toISOString(), reused, usage: { used: admissions, limit: 50, remaining: 50 - admissions, resetsAt: '2026-10-03T00:00:00.000Z', unit: 'requests' } } } };
+      const token = `${code}.controlled-admission-${admissions}`;
+      panelCountries.set(token, code);
+      return { structuredContent: { countryCode: code, topic: args.topic ?? 'overview', panelRequest: { token, countryCode: code, expiresAt: new Date(Date.now() + 300000).toISOString(), reused, usage: { used: admissions, limit: 50, remaining: 50 - admissions, resetsAt: '2026-10-03T00:00:00.000Z', unit: 'requests' } } } };
     }
     const section = String(args.section);
+    if (rawScenario && delayOrder && (rawScenario === 'military-first' ? section === 'signalsRaw' : ['flights', 'vessels', 'fleet'].includes(section))) await orderedCompletion;
+    if (rawScenario && section === 'signalsRaw') {
+      const time = rawRetrievedAt;
+      const selectedCountry = code;
+      const sources = Object.fromEntries(RAW_SIGNAL_FAMILIES.map(family => [family, failedRawSignal(family, rawMode === 'denied' ? 'locked' : 'unavailable', time, 'Controlled raw source failure')])) as RawSignalsValue['sources'];
+      if (rawMode === 'observed' || rawMode === 'zero') {
+        sources.earthquakes = validateRawSignal('earthquakes', { earthquakes: [{ id: 'fixture-eq', place: 'United States', magnitude: 4.5, location: { latitude: 38, longitude: -77 }, occurredAt: 1791000000000, source: 'USGS', category: 'earthquake', sourceUrl: 'https://example.com/quake' }] }, time) as typeof sources.earthquakes;
+        sources.outages = validateRawSignal('outages', { outages: rawMode === 'zero' ? [] : [{ id: 'fixture-outage', title: 'Controlled outage', country: geometryUnavailable ? 'Canada' : 'United States', location: geometryUnavailable ? { latitude: 45.4215, longitude: -75.6972 } : { latitude: 38, longitude: -77 }, detectedAt: 1791000000000, endedAt: 1791000300000, link: 'https://example.com/outage' }] }, time) as typeof sources.outages;
+        sources.advisories = validateRawSignal('advisories', { advisories: [{ title: 'Controlled advisory', link: 'https://example.com/advisory', source: 'US State Dept', sourceCountry: 'US', pubDate: '2026-10-01T12:00:00Z', level: rawAdvisoryLevel, country: 'US' }], byCountry: Object.fromEntries(Array.from({ length: 100 }, (_, index) => [`C${index}`, 'normal'])) }, time) as typeof sources.advisories;
+        sources.thermal = validateRawSignal('thermal', { clusters: [{ id: 'fixture-hot', countryCode: 'US', status: 'THERMAL_STATUS_SPIKE', firstDetectedAt: '2026-10-01T12:00:00Z', lastDetectedAt: '2026-10-01T14:00:00Z' }], fetchedAt: time, observationWindowHours: 24, sourceVersion: 'thermal-escalation-v1' }, time) as typeof sources.thermal;
+      }
+      if (delayRaw) await delayedRaw;
+      rawCompleted++;
+      return { structuredContent: assembleRawSignals(selectedCountry, sources, time) };
+    }
     if (section === 'facts' && code === 'US' && delayUS) await delayed;
+    if (section === 'facts' && factsDenied) return { structuredContent: { section, state: 'locked', reason: 'Controlled facts authorization loss' } };
     if (section === 'facts' && failFacts) return { structuredContent: { section, state: 'unavailable', reason: 'Controlled source failure' } };
+    if (denyActivity && ['vessels', 'flights', 'fleet'].includes(section)) return { structuredContent: { section, state: 'locked', reason: 'Controlled authorization loss' } };
     if (failActivity && section === 'vessels') return { structuredContent: { section, state: 'unavailable', reason: 'Controlled AIS outage' } };
     if (delayAtlasDetail && ['pipelineDetail', 'facilityDetail'].includes(section)) await delayedAtlasDetail;
     if (atlasOutages.timeline && section === 'disruptions') await delayedDisruptions;
@@ -82,10 +121,13 @@ async function installCountryHost(page: Page, fullExposure = false, initialOpenE
     const facility = { id: 'us-storage', name: 'Controlled US Storage', operator: 'Fixture storage operator', country: 'US', facilityType: 'spr', capacityMb: 12, capacityTwh: 0, capacityMtpa: 0, workingCapacityUnit: 'Mb', inService: 2025, location: { lat: 38, lon: -77 }, publicBadge: 'operational', evidence: { physicalState: 'operational', physicalStateSource: 'operator', commercialState: 'active', operatorStatement: { text: 'Controlled storage statement', url: 'https://example.com/storage-source', date: '2026-10-01' }, sanctionRefs: [] } };
     const shortage = { id: 'us-shortage', country: 'US', product: 'diesel', severity: 'confirmed', firstSeen: '2026-09-29', lastConfirmed: '2026-10-01', resolvedAt: '', shortDescription: 'Controlled active shortage', impactTypes: ['transport'], causeChain: ['supply'], evidence: { evidenceSources: [{ authority: 'Fixture authority', title: 'Controlled shortage source', url: 'https://example.com/shortage-source', date: '2026-10-01', sourceType: 'official' }], classifierConfidence: 0.9 } };
     const values: Record<string, object> = {
-      flights: { flights: [{ id: 'controlled-us-flight', operatorCountry: 'US', location: { latitude: 38, longitude: -77 } }], pagination: { nextCursor: '' } },
-      vessels: { dataAvailable: true, snapshot: { snapshotAt: Date.now(), status: { connected: true }, candidateReports: [{ mmsi: '235123456', name: 'Controlled military activity', shipType: 35, lat: 38, lon: -77, timestamp: Date.now() }] } },
+      flights: { flights: code === 'FR' ? [
+        { id: 'controlled-paris-flight', operatorCountry: 'FR', location: { latitude: 48.8566, longitude: 2.3522 } },
+        { id: 'controlled-zurich-flight', operatorCountry: 'CH', location: { latitude: 47.3769, longitude: 8.5417 } },
+      ] : [{ id: 'controlled-us-flight', operatorCountry: 'US', location: { latitude: 38, longitude: -77 } }], pagination: { nextCursor: '' } },
+      vessels: { dataAvailable: true, snapshot: { snapshotAt: Date.now(), status: { connected: true }, candidateReports: [{ mmsi: '235123456', name: 'Controlled military activity', shipType: 35, lat: code === 'FR' ? 47.3769 : 38, lon: code === 'FR' ? 8.5417 : -77, timestamp: Date.now() }] } },
       fleet: {},
-      facts: { countryCode: code, countryName: code, capital: code === 'US' ? 'Washington, D.C.' : 'Kyiv', population: '340100000', areaSqKm: 9826675, languages: ['English'], currencies: ['US dollar'] },
+      facts: { countryCode: code, countryName: code, wikipediaSummary: 'Controlled facts observed 2026-10-01.', capital: code === 'US' ? 'Washington, D.C.' : 'Kyiv', population: '340100000', areaSqKm: 9826675, languages: ['English'], currencies: ['US dollar'] },
       factors: us.scorecard,
       risk: { upstreamUnavailable: true },
       scenario: { countryCode: code, chokepointId: String((args.arguments as Record<string, unknown>).chokepoint_id), disruptionPct: Number((args.arguments as Record<string, unknown>).disruption_pct), dataAvailable: true, jodiOilCoverage: true, crudeLossKbd: 100, gulfCrudeShare: 0.3, products: [], limitations: [], coverageLevel: 'partial', gasSensitivity: { dataAvailable: true, lngImportsTj: 100000, totalDemandTj: 500000, lngDisruptionTj: Number((args.arguments as Record<string, unknown>).disruption_pct) * 300, deficitPct: Number((args.arguments as Record<string, unknown>).disruption_pct) * 0.06, dataMonth: '2026-05', dataSource: 'JODI', modelBasis: 'assumed_route_sensitivity', assessment: 'Controlled route sensitivity, not measured supplier exposure.' } },
@@ -124,11 +166,19 @@ async function installCountryHost(page: Page, fullExposure = false, initialOpenE
       value.missing = ['imfGrowth'];
     }
     if (partialBootstrap && section === 'housing') (values.housing as { missing?: string[] }).missing = ['bisPropertyCommercial'];
+    if (section === 'defense' && defenseClockFixture) return { structuredContent: { section, state: 'ready', retrievedAt: '2026-10-06T08:00:00.000Z', value: buildDefenseIndustrialResponse(code, {
+      fetchedAt: '2026-10-02T06:00:00.000Z',
+      countries: { [code]: { expenditurePctGdp: { value: 1.3, year: 2024, source: 'World Bank' } } },
+    }, {
+      fetchedAt: '2026-10-05T07:00:00.000Z',
+      importers: { [code]: { fetchedAt: '2026-10-01T05:00:00.000Z', retained: true, suppliers: [{ supplierIso2: 'CA', tivShare: 1 }],
+        mappingCoverage: 0.8, window: { startYear: 2021, endYear: 2025 }, source: 'SIPRI Arms Transfers Database' } },
+    }) } };
     if (section === 'defense' || section === 'resilience') return { structuredContent: { section, state: 'locked', reason: 'Controlled connection lacks access' } };
     return { structuredContent: { section, state: 'ready', value: values[section] ?? {}, retrievedAt: '2026-10-01T15:00:00.000Z' } };
   });
   await page.goto('/country-host-test');
-  const html = await readFile(join(root, 'dist/plugin/country.html'), 'utf8');
+  const html = cachedShell ?? await readFile(join(root, 'dist/plugin/country.html'), 'utf8');
   await page.evaluate(html => {
     const frame = document.querySelector('iframe')!;
     window.addEventListener('message', async event => {
@@ -159,8 +209,341 @@ async function installCountryHost(page: Page, fullExposure = false, initialOpenE
     window.addEventListener('message', receive);
     frame.contentWindow!.postMessage({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }, '*');
   }), { name, args });
-  return { calls, contexts, links, unmanaged, cancelled, action, releaseDisruptions, failAtlas: () => { atlasUnavailable = true; }, recoverAtlas: () => { atlasUnavailable = false; }, delayAtlasDetail: () => { delayAtlasDetail = true; }, releaseAtlasDetail, failDisruptions: () => { disruptionsFailed = true; }, failEnergy: () => { energyFailed = true; }, partialAtlas: () => { atlasPartial = true; }, denyAtlas: () => { atlasDenied = true; }, activityOutage: () => { failActivity = true; }, activityRecover: () => { failActivity = false; }, partial: () => { partialBootstrap = true; }, complete: () => { partialBootstrap = false; }, quota: () => { quotaExceeded = true; }, get admissions() { return admissions; }, delayAdmission: () => { delayAdmission = true; }, releaseAdmission, delayCoverage: () => { delayCoverage = true; }, releaseCoverage, fail: () => { failFacts = true; }, recover: () => { failFacts = false; }, delay: () => { delayUS = true; }, release: releaseUS };
+  return { delayRaw: () => { delayRaw = true; }, releaseRaw, get rawCompleted() { return rawCompleted; }, admissionFail: (reason: string) => { admissionFailure = reason; }, rawInfo: () => { rawAdvisoryLevel = 'info'; }, calls, contexts, links, unmanaged, cancelled, action, releaseOrder, rawFail: () => { rawMode = 'transient'; rawRetrievedAt = '2026-10-05T12:30:00.000Z'; }, rawDeny: () => { rawMode = 'denied'; rawRetrievedAt = '2026-10-05T12:40:00.000Z'; }, rawZero: () => { rawMode = 'zero'; rawRetrievedAt = '2026-10-05T12:35:00.000Z'; }, rawRecover: () => { rawMode = 'observed'; rawRetrievedAt = '2026-10-05T12:45:00.000Z'; }, releaseDisruptions, failAtlas: () => { atlasUnavailable = true; }, recoverAtlas: () => { atlasUnavailable = false; }, delayAtlasDetail: () => { delayAtlasDetail = true; }, releaseAtlasDetail, failDisruptions: () => { disruptionsFailed = true; }, failEnergy: () => { energyFailed = true; }, partialAtlas: () => { atlasPartial = true; }, denyAtlas: () => { atlasDenied = true; }, activityOutage: () => { failActivity = true; }, activityRecover: () => { failActivity = false; }, denyActivity: () => { denyActivity = true; }, partial: () => { partialBootstrap = true; }, complete: () => { partialBootstrap = false; }, quota: () => { quotaExceeded = true; }, get admissions() { return admissions; }, delayAdmission: () => { delayAdmission = true; }, releaseAdmission, delayCoverage: () => { delayCoverage = true; }, releaseCoverage, fail: () => { failFacts = true; }, denyFacts: () => { factsDenied = true; }, recover: () => { failFacts = false; factsDenied = false; }, delay: () => { delayUS = true; }, release: releaseUS };
 }
+
+test('static country tiers match the website without adding host data readers', async ({ page }, info) => {
+  const host = await installCountryHost(page);
+  const frame = page.frameLocator('iframe');
+  await expect.poll(() => host.contexts.at(-1)?.signals?.militaryFlights).toBe(1);
+  await expect.poll(() => host.contexts.at(-1)?.sections.filter(section => section.state === 'loading').length).toBe(0);
+  await writeFile(info.outputPath('static-tier-opening.json'), JSON.stringify({ context: host.contexts.at(-1), calls: host.calls }, null, 2));
+  await expect.poll(() => host.contexts.at(-1)?.signals?.isTier1).toBe(true);
+  await page.screenshot({ path: info.outputPath('static-tier-us-desktop.png'), fullPage: true });
+  const initialCalls = host.calls.length;
+  const selected = await host.action('select_country_view', { country_code: 'US', topic: 'security' });
+  expect(selected).toMatchObject({ structuredContent: { countryCode: 'US', signals: { isTier1: true } } });
+  await frame.getByRole('button', { name: 'Overview', exact: true }).click();
+  await expect.poll(() => host.contexts.at(-1)?.topic).toBe('overview');
+  expect(host.calls).toHaveLength(initialCalls);
+  expect(host.admissions).toBe(1);
+
+  await frame.getByRole('textbox', { name: 'Country name or code' }).fill('Switzerland');
+  await frame.getByRole('button', { name: 'Open country', exact: true }).click();
+  await expect.poll(() => host.contexts.at(-1)?.countryCode).toBe('CH');
+  await expect.poll(() => host.contexts.at(-1)?.signals?.isTier1).toBe(false);
+  expect(host.contexts.at(-1)?.signals?.criticalNews).toBeNull();
+  expect(host.contexts.at(-1)?.signals?.protests).toBeNull();
+  expect(host.admissions).toBe(2);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.screenshot({ path: info.outputPath('static-tier-ch-mobile.png'), fullPage: true });
+
+  host.denyActivity();
+  await frame.getByRole('button', { name: 'Refresh country', exact: true }).click();
+  await expect.poll(() => host.admissions).toBe(3);
+  await expect.poll(() => host.contexts.at(-1)?.signals?.militaryFlights).toBeNull();
+  await expect.poll(() => host.contexts.at(-1)?.signals?.isTier1).toBe(false);
+  await expect.poll(() => host.contexts.at(-1)?.sections.find(section => section.section === 'signals')?.state).toBe('unavailable');
+  await frame.getByRole('button', { name: 'Security', exact: true }).click();
+  await frame.locator('[data-brief-section=signals]').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: info.outputPath('static-tier-denied-ch-mobile.png'), fullPage: true });
+  await frame.getByRole('textbox', { name: 'Country name or code' }).fill('USA');
+  await frame.getByRole('button', { name: 'Open country', exact: true }).click();
+  await expect.poll(() => host.contexts.at(-1)?.countryCode).toBe('US');
+  await expect.poll(() => host.contexts.at(-1)?.signals?.isTier1).toBe(true);
+  expect(host.contexts.at(-1)?.signals?.militaryFlights).toBeNull();
+  await expect.poll(() => host.contexts.at(-1)?.sections.find(section => section.section === 'signals')?.state).toBe('unavailable');
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await frame.getByRole('button', { name: 'Security', exact: true }).click();
+  await frame.locator('[data-brief-section=signals]').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: info.outputPath('static-tier-denied-us-desktop.png'), fullPage: true });
+  expect(host.admissions).toBe(3);
+  expect(host.unmanaged).toEqual([]);
+  await writeFile(info.outputPath('static-tier-final.json'), JSON.stringify({ contexts: host.contexts, calls: host.calls, admissions: host.admissions }, null, 2));
+});
+
+test('country territory counts honor loaded polygons instead of neighboring bounding-box observations', async ({ page }, info) => {
+  const host = await installCountryHost(page);
+  const frame = page.frameLocator('iframe');
+  await expect(frame.locator('[data-brief-section=military] .cdp-military-grid')).toContainText('Own Flights1');
+  await frame.getByRole('textbox', { name: 'Country name or code' }).fill('FR');
+  await frame.getByRole('button', { name: 'Open country', exact: true }).click();
+  await expect(frame.locator('#countryStatus')).toContainText('France country brief.');
+  await frame.getByRole('button', { name: 'Security', exact: true }).click();
+  const military = frame.locator('[data-brief-section=military]');
+  const grid = military.locator('.cdp-military-grid');
+  await expect(grid).toContainText('Own Flights1');
+  await military.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: info.outputPath('country-territory-desktop.png'), fullPage: true });
+  await expect(grid).toContainText('Foreign Flights0');
+  await expect(grid).toContainText('Naval Vessels0');
+  await expect(grid).toContainText('Foreign PresenceUnknown');
+  await expect.poll(() => host.contexts.at(-1)?.sections.find(section => section.section === 'military')?.renderedText).toMatch(/Foreign Flights\s*0/);
+  expect(host.admissions).toBe(2);
+  await frame.getByRole('button', { name: 'Overview', exact: true }).click();
+  await frame.getByRole('button', { name: 'Security', exact: true }).click();
+  expect(host.admissions).toBe(2);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await military.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: info.outputPath('country-territory-mobile.png'), fullPage: true });
+});
+
+test('country Signals reuse loaded military observations and keep missing sources explicit', async ({ page }, info) => {
+  const host = await installCountryHost(page, true);
+  const frame = page.frameLocator('iframe');
+  await frame.getByRole('button', { name: 'Security', exact: true }).click();
+  const signals = frame.locator('[data-brief-section=signals]');
+  await expect(signals).toContainText('1 Military Air');
+  await expect(signals).toContainText('1 Naval Vessels');
+  await expect(signals).toContainText('Critical News unavailable');
+  await expect(signals).toContainText('Aggregate severity and recent high-severity observations are unavailable');
+  await expect(signals).toHaveAttribute('data-brief-coverage', 'partial');
+  await expect.poll(() => host.contexts.at(-1)?.signals?.militaryFlights).toBe(1);
+  expect(host.contexts.at(-1)?.signals?.criticalNews).toBeNull();
+  await expect.poll(() => host.contexts.at(-1)?.sections.filter(section => section.state === 'loading').length).toBe(0);
+  const initialReads = host.calls.length;
+  await frame.getByRole('button', { name: 'Economy & trade', exact: true }).click();
+  await frame.getByRole('button', { name: 'Security', exact: true }).click();
+  expect(host.calls).toHaveLength(initialReads);
+  expect(host.admissions).toBe(1);
+  await signals.screenshot({ path: info.outputPath('signals-observed-desktop.png') });
+  host.activityOutage();
+  await frame.getByRole('button', { name: 'Refresh country', exact: true }).click();
+  await expect(signals).toContainText('Showing previously loaded observations');
+  await expect(signals).toContainText('1 Naval Vessels');
+  await expect(signals).toContainText('1 Military Air');
+  await expect.poll(() => host.contexts.at(-1)?.signals?.militaryVessels).toBe(1);
+  await signals.screenshot({ path: info.outputPath('signals-source-outage-desktop.png') });
+  host.activityRecover();
+  await frame.getByRole('button', { name: 'Refresh country', exact: true }).click();
+  await expect(signals).toContainText('1 Naval Vessels');
+  await expect(signals).not.toContainText('Naval Vessels unavailable');
+  await expect.poll(() => host.contexts.at(-1)?.signals?.militaryVessels).toBe(1);
+  await expect(signals).not.toContainText('Showing previously loaded observations');
+  expect(host.admissions).toBe(3);
+  expect(host.unmanaged).toEqual([]);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signals.screenshot({ path: info.outputPath('signals-recovered-mobile.png') });
+  expect(await frame.locator('body').evaluate(body => body.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  await writeFile(info.outputPath('signals-request-cost.json'), JSON.stringify({ surface: 'compiled opaque iframe, controlled observations', initialHostCalls: initialReads, initialDailyUnits: 1, navigationCalls: 0, newSignalsReaders: 1, signalProjection: 'observed military counts, remaining sources explicitly unavailable' }, null, 2));
+  host.denyActivity();
+  await frame.getByRole('button', { name: 'Refresh country', exact: true }).click();
+  await expect(signals).toContainText('Military Air unavailable');
+  await expect(signals).toContainText('Naval Vessels unavailable');
+  await expect(signals).not.toContainText('Showing previously loaded observations');
+  await expect.poll(() => host.contexts.at(-1)?.signals?.militaryFlights).toBeNull();
+  await expect.poll(() => host.contexts.at(-1)?.signals?.militaryVessels).toBeNull();
+  expect(host.admissions).toBe(4);
+});
+
+test('informational advisories remain observed without caution escalation', async ({ page }, info) => {
+  const host = await installCountryHost(page, true, undefined, false, {}, undefined, 'raw-first');
+  const frame = page.frameLocator('iframe');
+  await frame.getByRole('button', { name: 'Security', exact: true }).click();
+  host.releaseOrder();
+  host.rawInfo();
+  await frame.getByRole('button', { name: 'Refresh country', exact: true }).click();
+  await expect.poll(() => host.contexts.at(-1)?.signals?.travelAdvisoryMaxLevel).toBe('info');
+  const signals = frame.locator('[data-brief-section=signals]');
+  await expect(signals).toContainText('1 Advisory: Info');
+  await expect(signals).not.toContainText('Exercise Caution');
+  await signals.screenshot({ path: info.outputPath('info-advisory-desktop.png') });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signals.screenshot({ path: info.outputPath('info-advisory-mobile.png') });
+});
+
+for (const denied of [true, false]) test(`admission failure ${denied ? 'clears denied' : 'preserves transient'} raw Signals`, async ({ page }, info) => {
+  const host = await installCountryHost(page, true, undefined, false, {}, undefined, 'raw-first');
+  const frame = page.frameLocator('iframe');
+  await frame.getByRole('button', { name: 'Security', exact: true }).click();
+  host.releaseOrder();
+  await expect.poll(() => host.contexts.at(-1)?.signals?.militaryFlights).toBe(1);
+  await expect.poll(() => host.contexts.at(-1)?.signals?.earthquakes).toBe(1);
+  const sectionCalls = host.calls.filter(call => call.name === 'get_country_brief_section').length;
+  host.admissionFail(denied ? 'Controlled entitlement forbidden' : 'Controlled temporary admission failure');
+  await frame.getByRole('button', { name: 'Refresh country', exact: true }).click();
+  await expect(frame.locator('#countryStatus')).toContainText(denied ? 'not authorized' : 'Controlled temporary admission failure');
+  await expect.poll(() => host.contexts.at(-1)?.signals?.earthquakes).toBe(denied ? null : 1);
+  await expect.poll(() => host.contexts.at(-1)?.signals?.militaryFlights).toBe(1);
+  expect(host.contexts.at(-1)?.signals?.isTier1).toBe(true);
+  expect(host.calls.filter(call => call.name === 'get_country_brief_section')).toHaveLength(sectionCalls);
+  const signals = frame.locator('[data-brief-section=signals]');
+  if (denied) {
+    await expect(signals).toContainText('Earthquakes unavailable');
+    await expect(signals).not.toContainText('USGS and Natural Resources Canada');
+    const downloadPromise = page.waitForEvent('download');
+    await frame.getByRole('button', { name: 'Evidence', exact: true }).click();
+    const download = await downloadPromise;
+    const exportPath = info.outputPath('denied-admission-evidence.md');
+    await download.saveAs(exportPath);
+    const exported = await readFile(exportPath, 'utf8');
+    expect(exported).not.toContain('Earthquakes: 1');
+    expect(exported).not.toContain('USGS and Natural Resources Canada');
+  }
+  await signals.screenshot({ path: info.outputPath(`admission-${denied ? 'denied' : 'transient'}-desktop.png`) });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signals.screenshot({ path: info.outputPath(`admission-${denied ? 'denied' : 'transient'}-mobile.png`) });
+});
+
+test('AI admission denial clears raw Signals and cancels late raw republishing', async ({ page }, info) => {
+  const host = await installCountryHost(page, true, undefined, false, {}, undefined, 'raw-first');
+  const frame = page.frameLocator('iframe');
+  await frame.getByRole('button', { name: 'Security', exact: true }).click();
+  host.releaseOrder();
+  await expect.poll(() => host.contexts.at(-1)?.signals?.militaryFlights).toBe(1);
+  await expect.poll(() => host.contexts.at(-1)?.signals?.earthquakes).toBe(1);
+  host.delayRaw();
+  await frame.getByRole('button', { name: 'Refresh country', exact: true }).click();
+  await expect.poll(() => host.calls.filter(call => call.arguments.section === 'signalsRaw').length).toBe(2);
+  host.admissionFail('Controlled entitlement forbidden');
+  await frame.getByRole('button', { name: 'New AI assessment', exact: true }).click();
+  await expect.poll(() => host.contexts.at(-1)?.signals?.earthquakes).toBeNull();
+  await expect.poll(() => host.contexts.at(-1)?.signals?.militaryFlights).toBe(1);
+  expect(host.contexts.at(-1)?.signals?.isTier1).toBe(true);
+  await expect.poll(() => host.cancelled.filter(name => name === 'get_country_brief_section').length).toBeGreaterThan(0);
+  host.releaseRaw();
+  await expect.poll(() => host.rawCompleted).toBe(2);
+  const signals = frame.locator('[data-brief-section=signals]');
+  await expect(signals).toContainText('Earthquakes unavailable');
+  await expect(signals).not.toContainText('USGS and Natural Resources Canada');
+  expect(host.contexts.at(-1)?.signals?.earthquakes).toBeNull();
+  await signals.screenshot({ path: info.outputPath('ai-admission-denied-desktop.png') });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signals.screenshot({ path: info.outputPath('ai-admission-denied-mobile.png') });
+});
+
+test.describe('localized normal travel advice', () => {
+  test.use({ locale: 'fr-FR' });
+  test('renders normal advice in French without English fallback or caution escalation', async ({ page }, info) => {
+    const host = await installCountryHost(page, true, undefined, false, {}, undefined, 'raw-first');
+    const frame = page.frameLocator('iframe');
+    await frame.getByRole('button', { name: 'Security', exact: true }).click();
+    const signals = frame.locator('[data-brief-section=signals]');
+    await expect(signals).toContainText('Précautions habituelles');
+    await expect(signals).not.toContainText('Normal Precautions');
+    await expect(signals).not.toContainText('Faire preuve de prudence');
+    await signals.screenshot({ path: info.outputPath('normal-advice-fr-desktop.png') });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await signals.screenshot({ path: info.outputPath('normal-advice-fr-mobile.png') });
+    host.releaseOrder();
+  });
+});
+
+test('raw Signals keep earthquake counts unknown and exclude foreign outages when country geometry is unavailable', async ({ page }, info) => {
+  const host = await installCountryHost(page, true, undefined, false, {}, undefined, 'raw-first', true);
+  const frame = page.frameLocator('iframe');
+  await frame.getByRole('button', { name: 'Security', exact: true }).click();
+  const signals = frame.locator('[data-brief-section=signals]');
+  await expect.poll(() => host.contexts.at(-1)?.signals?.outages).toBe(0);
+  await expect.poll(() => host.contexts.at(-1)?.signals?.earthquakes).toBeNull();
+  await expect(signals).toContainText('Earthquakes unavailable');
+  await expect(signals).toContainText('Earthquake country count is unknown because country geometry is unavailable.');
+  await expect(signals).not.toContainText('1 Earthquakes');
+  await expect(signals).not.toContainText('1 Outages');
+  await signals.screenshot({ path: info.outputPath('geometry-unavailable-signals.png') });
+  host.releaseOrder();
+});
+
+for (const order of ['military-first', 'raw-first'] as const) test(`observed raw Signals preserve independent completion slots, scope and recovery: ${order}`, async ({ page }, info) => {
+  const host = await installCountryHost(page, true, undefined, false, {}, undefined, order);
+  const frame = page.frameLocator('iframe');
+  await frame.getByRole('button', { name: 'Security', exact: true }).click();
+  const signals = frame.locator('[data-brief-section=signals]');
+  if (order === 'military-first') { await expect.poll(() => host.contexts.at(-1)?.signals?.militaryFlights).toBe(1); expect(host.contexts.at(-1)?.signals?.earthquakes).toBeNull(); }
+  else { await expect.poll(() => host.contexts.at(-1)?.signals?.earthquakes).toBe(1); expect(host.contexts.at(-1)?.signals?.militaryFlights).toBeNull(); }
+  host.releaseOrder();
+  await expect.poll(() => host.contexts.at(-1)?.signals).toMatchObject({ militaryFlights: 1, militaryVessels: 1, earthquakes: 1, outages: 1, travelAdvisories: 1, travelAdvisoryMaxLevel: 'normal', thermalEscalations: 1, isTier1: true });
+  await expect(signals).toContainText('Normal Precautions');
+  await expect(signals).not.toContainText('Exercise Caution');
+  await expect(signals).toContainText('1 Thermal escalations');
+  await expect(signals).toContainText('Snapshot time unknown');
+  await expect(signals).toContainText('Original returned-sample dates');
+  await expect(signals).toContainText('US State Dept');
+  await expect.poll(() => host.contexts.at(-1)?.sections.filter(section => section.state === 'loading').length).toBe(0);
+  const initialCalls = host.calls.length;
+  expect(host.calls.filter(call => call.arguments.section === 'signalsRaw')).toHaveLength(1);
+  await frame.getByRole('button', { name: 'Economy & trade', exact: true }).click();
+  await frame.getByRole('button', { name: 'Security', exact: true }).click();
+  expect(host.calls).toHaveLength(initialCalls); expect(host.admissions).toBe(1);
+  await signals.screenshot({ path: info.outputPath(`raw-signals-${order}-desktop.png`) });
+  host.rawFail();
+  await frame.getByRole('button', { name: 'Refresh country', exact: true }).click();
+  await expect(signals).toContainText('these counts are not fresh');
+  await expect.poll(() => (host.contexts.at(-1) as any)?.signalCoverage?.earthquakes.retained).toBe(true);
+  const coverage = (host.contexts.at(-1) as any).signalCoverage;
+  expect(coverage.earthquakes.observation.retrievedAt).toBe('2026-10-05T12:00:00.000Z');
+  expect(coverage.earthquakes.latestRetrievedAt).toBe('2026-10-05T12:30:00.000Z');
+  await signals.screenshot({ path: info.outputPath(`raw-signals-${order}-retained-desktop.png`) });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signals.locator('p').filter({ hasText: 'earthquakes:' }).first().evaluate(element => element.scrollIntoView({ block: 'start' }));
+  await page.screenshot({ path: info.outputPath(`raw-signals-${order}-retained-mobile-coverage.png`) });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  const downloadPromise = page.waitForEvent('download');
+  await frame.getByRole('button', { name: 'Evidence', exact: true }).click();
+  const download = await downloadPromise;
+  const exportPath = info.outputPath(`raw-signals-${order}-retained.md`);
+  await download.saveAs(exportPath);
+  const exported = await readFile(exportPath, 'utf8');
+  expect(exported).toContain('Earthquakes: 1');
+  expect(exported).toContain('these counts are not fresh');
+  expect(exported).toContain('Snapshot time unknown');
+  expect(exported).toContain('USGS and Natural Resources Canada');
+  expect(exported).toContain('US State Dept');
+  host.rawZero();
+  await frame.getByRole('button', { name: 'Refresh country', exact: true }).click();
+  await expect.poll(() => host.contexts.at(-1)?.signals?.outages).toBe(0);
+  await expect(signals).not.toContainText('these counts are not fresh');
+  await signals.screenshot({ path: info.outputPath(`raw-signals-${order}-zero-desktop.png`) });
+  host.rawDeny();
+  await frame.getByRole('button', { name: 'Refresh country', exact: true }).click();
+  await expect.poll(() => host.contexts.at(-1)?.signals?.earthquakes).toBeNull();
+  await expect.poll(() => host.contexts.at(-1)?.signals?.militaryFlights).toBe(1);
+  await signals.screenshot({ path: info.outputPath(`raw-signals-${order}-denied-desktop.png`) });
+  host.rawRecover();
+  await frame.getByRole('button', { name: 'Refresh country', exact: true }).click();
+  await expect.poll(() => host.contexts.at(-1)?.signals?.earthquakes).toBe(1);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signals.screenshot({ path: info.outputPath(`raw-signals-${order}-mobile.png`) });
+  const rawScope = signals.locator('p').filter({ hasText: 'earthquakes:' }).first();
+  await rawScope.evaluate(element => element.scrollIntoView({ block: 'start' }));
+  await page.screenshot({ path: info.outputPath(`raw-signals-${order}-mobile-coverage.png`) });
+  expect(await frame.locator('body').evaluate(body => body.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  expect(host.unmanaged).toEqual([]);
+  await writeFile(info.outputPath('raw-signals-evidence.json'), JSON.stringify({ order, context: host.contexts.at(-1), initialCalls, rawCalls: host.calls.filter(call => call.arguments.section === 'signalsRaw').length, localTopicNavigationCalls: 0, calls: host.calls, proof: 'compiled opaque iframe, controlled observations; excludes native download, live auth, providers and source-time equality' }, null, 2));
+  await host.action('select_country_view', { country_code: 'CN', topic: 'security', refresh: true });
+  await expect.poll(() => host.contexts.at(-1)?.signals?.earthquakes).toBe(0);
+  expect((host.contexts.at(-1) as any)?.signalCoverage.earthquakes.retained).toBe(false);
+});
+
+test('cached country resource loads the current compiled panel after its old assets are removed', async ({ page }, info) => {
+  const fetchBefore = globalThis.fetch;
+  let shell: string;
+  try {
+    globalThis.fetch = async () => new Response('<!doctype html><html><head></head><body><main id="countryRoot">Old country panel</main><script type="module" src="/plugin/assets/country-removed.js"></script></body></html>', { headers: { 'Content-Type': 'text/html' } });
+    const response = await (await readCountryView(1, {})).json();
+    shell = response.result.contents[0].text;
+  } finally { globalThis.fetch = fetchBefore; }
+  const requests: string[] = [];
+  page.on('request', request => requests.push(request.url()));
+  await page.route('**/plugin/country.html*', route => route.fulfill({ path: join(root, 'dist/plugin/country.html'), headers: { 'Access-Control-Allow-Origin': '*' } }));
+  const host = await installCountryHost(page, false, undefined, true, {}, shell);
+  const frame = page.frameLocator('iframe');
+  await expect(frame.locator('.cdp-country-name')).toHaveText('United States', { timeout: 5000 });
+  expect(requests.some(url => url.endsWith('/country-removed.js'))).toBe(false);
+  await frame.getByRole('button', { name: 'Resources & infrastructure', exact: true }).click();
+  const energy = frame.locator('[data-brief-section=energy]');
+  await expect(energy).toContainText('1 pipeline');
+  await energy.getByRole('button', { name: 'Controlled US Pipeline', exact: true }).click();
+  await expect(frame.locator('[data-country-atlas-detail]')).toContainText('Controlled operator statement');
+  await expect(frame.locator('[data-country-atlas-detail]')).toContainText('Controlled pipeline maintenance');
+  await frame.getByRole('button', { name: 'Back to country', exact: true }).click();
+  await frame.getByRole('button', { name: 'Overview', exact: true }).click();
+  expect(host.admissions).toBe(1);
+  await page.screenshot({ path: info.outputPath('cached-country-current-build.png'), fullPage: true });
+  await page.setViewportSize({ width: 430, height: 1200 });
+  await expect(frame.locator('.cdp-country-name')).toHaveText('United States');
+  await page.screenshot({ path: info.outputPath('cached-country-current-build-mobile.png'), fullPage: true });
+});
 
 test('country military observations render under one allocation and survive an AIS outage', async ({ page }, info) => {
   const host = await installCountryHost(page);
@@ -280,24 +663,73 @@ test('built opaque country view uses the shared sections, host reads, sources an
   expect(host.calls.some(call => call.name === 'get_country_brief_section')).toBe(true);
 });
 
-test('refresh keeps prior observations and delayed country work cannot repaint a new country', async ({ page }) => {
+test('refresh keeps prior observations and delayed country work cannot repaint a new country', async ({ page }, info) => {
   const host = await installCountryHost(page);
   const frame = page.frameLocator('iframe');
   await expect(frame.locator('[data-brief-section=facts]')).toContainText('Washington, D.C.');
   await expect.poll(() => host.calls.filter(call => call.arguments.section === 'factors').length).toBe(1);
-  host.fail();
+  const facts = frame.locator('[data-brief-section=facts]');
+  const housing = frame.locator('[data-brief-section=housing]');
+  await expect(housing).toContainText('156.4');
+  await expect(housing).toContainText('2026-Q1');
+  const original = await facts.getByText('Controlled facts observed 2026-10-01.', { exact: true }).elementHandle();
+  const housingText = await housing.textContent();
+  let previousNotice: Awaited<ReturnType<typeof facts.elementHandle>> = null;
+  for (const failure of ['First', 'Second', 'Third']) {
+    host.fail();
+    await frame.getByRole('button', { name: 'Refresh country', exact: true }).click();
+    const staleNotice = previousNotice;
+    if (staleNotice) await expect.poll(() => staleNotice.evaluate(node => node.isConnected)).toBe(false);
+    await expect(facts).toContainText('This section could not be loaded. Retry to refresh it.');
+    await expect(facts, `${failure} failure preserves originals`).toContainText('Washington, D.C.');
+    await expect(facts).toContainText('Controlled facts observed 2026-10-01.');
+    expect(await original!.evaluate(node => node.isConnected)).toBe(true);
+    await expect(facts.locator('.cdp-refresh-failure')).toHaveCount(1);
+    await expect(facts.locator('[data-brief-state=unavailable]')).toHaveCount(1);
+    await expect(facts).toHaveAttribute('data-load-state', 'unavailable');
+    await expect(housing).toHaveText(housingText!);
+    previousNotice = await facts.locator('.cdp-refresh-failure').elementHandle();
+  }
+  await frame.getByRole('button', { name: 'All sections', exact: true }).click();
+  await expect(facts.getByText('Controlled facts observed 2026-10-01.', { exact: true })).toBeVisible();
+  for (const [name, width, height] of [['desktop', 1280, 900], ['mobile', 390, 844]] as const) {
+    await page.setViewportSize({ width, height });
+    await facts.screenshot({ path: info.outputPath(`facts-third-failure-${name}.png`) });
+  }
+  host.denyFacts();
   await frame.getByRole('button', { name: 'Refresh country', exact: true }).click();
-  await expect(frame.locator('[data-brief-section=facts]')).toContainText('Previously loaded observations remain visible');
-  await expect(frame.locator('[data-brief-section=facts]')).toContainText('Washington, D.C.');
-  await expect.poll(() => host.calls.filter(call => call.arguments.section === 'factors').length).toBe(2);
+  await expect(facts).toContainText('This section is not authorized by the current connection.');
+  await expect(facts.locator('.cdp-pro-locked')).toHaveCount(1);
+  await expect(facts).not.toContainText('Washington, D.C.');
+  expect(await original!.evaluate(node => node.isConnected)).toBe(false);
+  host.recover(); host.fail();
+  await frame.getByRole('button', { name: 'Refresh country', exact: true }).click();
+  await expect(facts).toContainText('This section could not be loaded. Retry to refresh it.');
+  await expect(facts).not.toContainText('Washington, D.C.');
+  await expect(facts.locator('.cdp-refresh-failure')).toHaveCount(0);
+  host.recover();
+  await frame.getByRole('button', { name: 'Refresh country', exact: true }).click();
+  await expect(facts).toContainText('Washington, D.C.');
+  await expect(facts.locator('.cdp-refresh-failure')).toHaveCount(0);
+  await expect(facts.locator('[data-brief-state=unavailable]')).toHaveCount(0);
+  expect(await original!.evaluate(node => node.isConnected)).toBe(false);
+  await expect(housing).toHaveText(housingText!);
+  await frame.getByRole('button', { name: 'All sections', exact: true }).click();
+  await expect(facts.getByText('Controlled facts observed 2026-10-01.', { exact: true })).toBeVisible();
+  for (const [name, width, height] of [['desktop', 1280, 900], ['mobile', 390, 844]] as const) {
+    await page.setViewportSize({ width, height });
+    await facts.screenshot({ path: info.outputPath(`facts-recovered-${name}.png`) });
+  }
+  const coverageReads = host.calls.filter(call => call.name === 'get_country_coverage').length;
   host.delayCoverage();
   await frame.getByRole('button', { name: 'Refresh country', exact: true }).click();
-  await expect.poll(() => host.calls.filter(call => call.name === 'get_country_coverage').length).toBe(3);
+  await expect.poll(() => host.calls.filter(call => call.name === 'get_country_coverage').length).toBe(coverageReads + 1);
   await frame.getByRole('button', { name: 'Refresh country', exact: true }).click();
   await expect.poll(() => host.cancelled).toContain('get_country_coverage');
   host.releaseCoverage();
   expect(host.calls.filter(call => call.name === 'get_country_brief')).toHaveLength(1);
-  await expect(frame.locator('#countryUsage')).toContainText('46 of 50 requests remaining');
+  expect(host.admissions).toBe(9);
+  await expect(frame.locator('#countryUsage')).toContainText('41 of 50 requests remaining');
   await frame.getByRole('button', { name: 'New AI assessment', exact: true }).click();
   await expect.poll(() => host.calls.filter(call => call.name === 'get_country_brief').length).toBe(2);
   host.recover();
@@ -319,6 +751,22 @@ test('refresh keeps prior observations and delayed country work cannot repaint a
   await frame.getByRole('button', { name: 'Open country', exact: true }).click();
   await expect(frame.locator('[data-brief-section=assessment]')).toContainText('Controlled US assessment');
   expect(host.calls.filter(call => call.name === 'get_country_brief')).toHaveLength(3);
+  host.fail();
+  await frame.getByRole('textbox', { name: 'Country name or code' }).fill('France');
+  await frame.getByRole('button', { name: 'Open country', exact: true }).click();
+  await expect(frame.locator('.cdp-country-name')).toHaveText('France');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await expect(facts).toContainText('This section could not be loaded. Retry to refresh it.');
+    await expect(facts).not.toContainText('Controlled facts observed 2026-10-01.');
+    await expect(facts.locator('.cdp-refresh-failure')).toHaveCount(0);
+    await expect(facts).toHaveAttribute('data-load-state', 'unavailable');
+    if (attempt === 0) {
+      const missingNotice = await facts.locator('[data-brief-state=unavailable]').elementHandle();
+      await frame.getByRole('button', { name: 'Refresh country', exact: true }).click();
+      await expect.poll(() => missingNotice!.evaluate(node => node.isConnected)).toBe(false);
+    }
+  }
+  expect(host.unmanaged).toEqual([]);
 });
 
 test('decision calculations and their JSON download use the authenticated host source', async ({ page }) => {
@@ -536,4 +984,34 @@ test('transient Atlas failure preserves same-country rows and detail actions whi
   await expect(energy).toContainText('Storage Atlas data is not authorized');
   await expect(energy.getByRole('button', { name: 'Controlled US Storage', exact: true })).toHaveCount(0);
   expect(host.admissions).toBe(3);
+});
+
+
+test('built country defense view and report preserve independent producer clocks', async ({ page }, info) => {
+  const host = await installCountryHost(page, false, undefined, false, {}, undefined, undefined, false, true);
+  const frame = page.frameLocator('iframe');
+  await frame.getByRole('button', { name: 'Security', exact: true }).click();
+  const military = frame.locator('[data-brief-section=military]');
+  await expect(military).toContainText('World Bank snapshot assembled 2026-10-02T06:00:00.000Z');
+  await expect(military).toContainText('SIPRI (US) snapshot assembled 2026-10-01T05:00:00.000Z');
+  await expect(military).toContainText('Supplier data retained');
+  await expect(military).toContainText('Mapped coverage');
+  await expect(military).not.toContainText('2026-10-05T07:00:00.000Z');
+  for (const [name, width, height] of [['desktop', 1280, 1000], ['mobile', 390, 844]] as const) {
+    await page.setViewportSize({ width, height });
+    await military.getByText('World Bank snapshot assembled 2026-10-02T06:00:00.000Z', { exact: true }).scrollIntoViewIfNeeded();
+    await expect(military.getByText('SIPRI (US) snapshot assembled 2026-10-01T05:00:00.000Z', { exact: true })).toBeInViewport();
+    await expect.poll(() => frame.locator('body').evaluate(body => body.scrollWidth <= innerWidth + 1)).toBe(true);
+    await page.screenshot({ path: info.outputPath(`defense-clocks-${name}.png`), fullPage: true });
+  }
+  await frame.getByRole('button', { name: 'Export report ↗', exact: true }).click();
+  const report = frame.locator('.cdp-output-paper');
+  await expect(report).toContainText('World Bank snapshot assembled 2026-10-02T06:00:00.000Z');
+  await expect(report).toContainText('SIPRI (US) snapshot assembled 2026-10-01T05:00:00.000Z');
+  await expect(report).toContainText('Supplier data retained');
+  await expect(report).not.toContainText('2026-10-05T07:00:00.000Z');
+  await report.getByText('World Bank snapshot assembled 2026-10-02T06:00:00.000Z', { exact: true }).scrollIntoViewIfNeeded();
+  await expect(report.getByText('SIPRI (US) snapshot assembled 2026-10-01T05:00:00.000Z', { exact: true })).toBeInViewport();
+  await page.screenshot({ path: info.outputPath('defense-clocks-report-mobile.png'), fullPage: true });
+  expect(host.unmanaged).toEqual([]);
 });

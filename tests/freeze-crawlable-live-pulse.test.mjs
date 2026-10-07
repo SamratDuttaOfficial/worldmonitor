@@ -180,6 +180,7 @@ function countryPayload() {
   // Fixed, not Date.now(): the freeze copies generatedAt through verbatim and
   // the assertions compare it exactly.
   const SCORECARD_GENERATED_AT = 1789020144012;
+  const MARKET_ALERT_METHODOLOGY = 'An emission resolves HIT when a tracked story names the same entity within six hours.';
 
   /**
    * Shaped like GET /api/forecast/v1/get-forecast-scorecard, including the
@@ -207,6 +208,34 @@ function countryPayload() {
       ],
       vsMarketSkill: { count: 78, forecastBrier: 0.154623, marketBrier: 0.073136, brierDelta: -0.081487 },
       skill: { count: 180, brier: 0.117824, logScore: 0.375127, excludedScored: 310, excludedOrigins: ['bet_engine', 'state_derived'] },
+      publishedByDomain: [{ domain: 'conflict', count: 120, brier: 0.11, yesCount: 30 }, { domain: 'market', count: 60, brier: 0.13, yesCount: 22 }],
+      uncertainty: {
+        method: 'entry-level percentile bootstrap, 1000 resamples, seed 7072',
+        overallBrier: { count: 490, mean: 0.192435, ci95: [0.178214, 0.207013], insufficientSample: false },
+        skillBrier: null,
+      },
+      funnel: {
+        matured: 820, immature: 130, maturityUnknown: 8, resolved: 772, scored: 490, pendingHardMatured: 12, pendingJudgeMatured: 36,
+        resolvedOfMatured: { count: 820, successes: 772, rate: 0.941463, ci95: [0.923243, 0.955567] },
+        scoredOfMatured: { count: 820, successes: 490, rate: 0.597561, ci95: [0.563617, 0.630595] },
+      },
+      receipts: [
+        { question: 'Will Brent reach 104.89 USD/bbl?', forecastAt: 1, probability: 0.35, outcome: 'NO', resolvedAt: 2, sourceFeed: 'commodity-prices', observedValue: 100.75, key: 'internal-ledger-key' },
+      ],
+      marketAlerts: {
+        schemaVersion: 1,
+        generatedAt: SCORECARD_GENERATED_AT,
+        windowHours: 6,
+        rollingWindowDays: 30,
+        methodology: MARKET_ALERT_METHODOLOGY,
+        totals: { pending: 1, resolved: 4, hit: 3, miss: 1, void: 0 },
+        archive: { readFailed: false, truncated: false, unproven: false, coveredFromMs: 1, readAt: 2 },
+        byType: [
+          { type: 'market', pending: 1, resolved: 4, hit: 3, miss: 1, void: 0, scored: 4, hitRate: 0.75, pairedHitRate: 0.5, baseN: 2, baseHitRate: 0.5, medianLeadTimeMs: 3600000 },
+          { type: 'prediction-market', scored: 0, baseN: 0 },
+        ],
+      },
+      familyOutcomes: [{ forecastId: 'fc-conflict-1', outcome: 'YES', key: 'internal-ledger-key' }],
       degraded: false,
       stale: false,
       error: '',
@@ -723,7 +752,18 @@ describe('freeze crawlable live pulse coverage gates', () => {
       [...SCORECARD_DECLARED_FIELDS].sort(),
       'the committed snapshot must carry the declared surface and nothing else',
     );
-    assert.doesNotMatch(JSON.stringify(section), /betEngine|judgedLane/);
+    assert.doesNotMatch(JSON.stringify(section), /betEngine|judgedLane|internal-ledger-key|coveredFromMs/);
+    assert.equal(section.scorecard.receipts[0].observedValue, 100.75);
+    assert.deepEqual(section.scorecard.marketAlerts, {
+      generatedAt: SCORECARD_GENERATED_AT,
+      windowHours: 6,
+      rollingWindowDays: 30,
+      methodology: MARKET_ALERT_METHODOLOGY,
+      byType: [
+        { type: 'market', scored: 4, hitRate: 0.75, baseN: 2, baseHitRate: 0.5, pairedHitRate: 0.5, medianLeadTimeMs: 3600000 },
+        { type: 'prediction-market', scored: 0, baseN: 0 },
+      ],
+    }, 'the market-alert block survives capture whitelisted member by member (#8867)');
     const state = classifyAccuracyState(section);
     assert.equal(state.availability, 'ok');
     assert.equal(state.coverage, 'measurable');

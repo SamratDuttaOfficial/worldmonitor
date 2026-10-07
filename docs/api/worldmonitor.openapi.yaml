@@ -6592,11 +6592,41 @@ paths:
             parameters:
                 - name: series_id
                   in: query
-                  description: FRED series ID (e.g., "GDP", "UNRATE", "CPIAUCSL").
+                  description: 'FRED series ID. Supported values: "BAMLC0A0CM", "BAMLH0A0HYM2", "CPIAUCSL", "DCOILWTICO", "DGS1", "DGS10", "DGS1MO", "DGS2", "DGS30", "DGS3MO", "DGS5", "DGS6MO", "ESTR", "EURIBOR1Y", "EURIBOR3M", "EURIBOR6M", "FEDFUNDS", "GDP", "GSCPI", "ICSA", "M2SL", "MORTGAGE30US", "SOFR", "STLFSI4", "T10Y2Y", "T10Y3M", "UNRATE", "VIXCLS", "WALCL".'
                   required: true
-                  example: "GDP"
+                  example: "BAMLC0A0CM"
                   schema:
                     type: string
+                    enum:
+                        - 'BAMLC0A0CM'
+                        - 'BAMLH0A0HYM2'
+                        - 'CPIAUCSL'
+                        - 'DCOILWTICO'
+                        - 'DGS1'
+                        - 'DGS10'
+                        - 'DGS1MO'
+                        - 'DGS2'
+                        - 'DGS30'
+                        - 'DGS3MO'
+                        - 'DGS5'
+                        - 'DGS6MO'
+                        - 'ESTR'
+                        - 'EURIBOR1Y'
+                        - 'EURIBOR3M'
+                        - 'EURIBOR6M'
+                        - 'FEDFUNDS'
+                        - 'GDP'
+                        - 'GSCPI'
+                        - 'ICSA'
+                        - 'M2SL'
+                        - 'MORTGAGE30US'
+                        - 'SOFR'
+                        - 'STLFSI4'
+                        - 'T10Y2Y'
+                        - 'T10Y3M'
+                        - 'UNRATE'
+                        - 'VIXCLS'
+                        - 'WALCL'
                 - name: limit
                   in: query
                   description: Maximum number of observations to return. Defaults to 120.
@@ -11225,13 +11255,14 @@ paths:
                                 "forecasts":
                                     - "calibration":
                                         "drift": 1.5
+                                        "internalProbability": 0.62
+                                        "marketBlendedProbability": 0.62
                                         "marketPrice": 75.25
                                         "marketTitle": "example"
-                                        "source": "example"
                                       "cascades":
                                           - "domain": "example"
                                             "effect": "example"
-                                            "probability": 1.5
+                                            "probability": 0.62
                                       "caseFile":
                                           "actorLenses":
                                               - "example"
@@ -11247,7 +11278,7 @@ paths:
                                           "branches":
                                               - "kind": "example"
                                                 "outcome": "example"
-                                                "projectedProbability": 1.5
+                                                "projectedProbability": 0.62
                                                 "rounds":
                                                     - {}
                                                 "summary": "Example WorldMonitor observation."
@@ -11380,8 +11411,8 @@ paths:
                                     - "brier": 1.5
                                       "bucket": "example"
                                       "count": 1
-                                      "maxProbability": 1.5
-                                      "minProbability": 1.5
+                                      "maxProbability": 0.62
+                                      "minProbability": 0.62
                                 "degraded": true
                                 "error": "example"
                             schema:
@@ -11480,10 +11511,8 @@ paths:
                 - name: runId
                   in: query
                   description: |-
-                    Optional run identifier. Does not select the package — the latest stored package is
-                     always returned regardless of this value. When supplied and it differs from the
-                     returned package's runId, the response `note` field is populated to warn that per-run
-                     filtering is not yet active. Reserved for Phase 3 per-run lookup.
+                    Optional run identifier. The latest package is always returned; when it
+                     differs from this value, note says so.
                   required: false
                   example: "example-id"
                   schema:
@@ -11598,28 +11627,16 @@ paths:
                 - ForecastService
             summary: GetSimulationOutcome
             description: |-
-                GetSimulationOutcome returns the latest stored forecast simulation outcome.
-                 Outcomes auto-refresh on the deep-forecast cron cadence (~hourly): each
-                 seed-forecasts cycle writes a simulation package and enqueues a worker
-                 task (scripts/seed-forecasts.mjs enqueueSimulationTask). Callers usually
-                 poll this endpoint rather than TriggerSimulation. The response note is
-                 populated when a supplied runId does not match the returned outcome.
+                GetSimulationOutcome returns the latest forecast simulation outcome, refreshed
+                 about hourly. The response note is set when a supplied runId does not match.
             operationId: GetSimulationOutcome
             parameters:
                 - name: runId
                   in: query
                   description: |-
-                    Filter is active for outcomes within the 24h retention window (#3734).
-                     If runId is supplied:
-                       - Hit on the by-run key → returns that outcome, processing=false.
-                       - By-run lookup returns the tombstone (worker write transiently failed) →
-                         falls through to :latest with a 'note' describing the transient failure.
-                       - No by-run match but runId is in the queue → returns processing=true.
-                       - No match anywhere → falls back to :latest with a 'note' describing
-                         expiry-or-mismatch.
-                     If runId is empty: returns :latest (existing behavior).
-                     Nonempty IDs contain an epoch in milliseconds, a hyphen and a 1-64 character
-                     alphanumeric or hyphen suffix. Maximum total length is 128 characters.
+                    Optional run ID (epoch ms, hyphen, 1-64 char suffix; max 128). Returns that
+                     run's outcome within 24h retention, processing=true while it is queued, or
+                     the latest outcome with a note. Empty returns the latest outcome.
                   required: false
                   "schema":
                       "type": "string"
@@ -11748,14 +11765,8 @@ paths:
                 - ForecastService
             summary: TriggerSimulation
             description: |-
-                TriggerSimulation enqueues a simulation task for the current
-                 SIMULATION_PACKAGE_LATEST_KEY package pointer. PRO-gated. Usually
-                 unnecessary — outcomes auto-run on each deep-forecast cron cycle (~hourly)
-                 via enqueueSimulationTask; use this only when you need a fresh run outside
-                 that cadence. The runId is server-derived; callers cannot supply one. The
-                 Railway worker (scripts/process-simulation-tasks.mjs) polls the queue and
-                 writes outcomes; callers poll GetSimulationOutcome with the returned runId
-                 to retrieve the result. Mirrors run-scenario.ts pattern. See #3734. Requires entitlement tier >= 1.
+                TriggerSimulation enqueues a simulation run for the current package outside
+                 the hourly cycle. PRO-gated. Poll GetSimulationOutcome with the returned runId. Requires entitlement tier >= 1.
             operationId: TriggerSimulation
             security:
                 - WorldMonitorKey: []
@@ -13440,8 +13451,8 @@ paths:
                 - name: keys
                   in: query
                   description: |-
-                    One registered bootstrap key, for example insights. Omit when using tier.
-                     The repeated wire field is retained for compatibility; multiple keys are rejected.
+                    Registered bootstrap keys, for example insights. Repeat the parameter for
+                     several fast/slow keys. Omit when using tier.
                   required: false
                   style: form
                   explode: true
@@ -13449,7 +13460,7 @@ paths:
                       - "example"
                   schema:
                     type: array
-                    maxItems: 1
+                    maxItems: 100
                     items:
                       type: string
                       minLength: 1
@@ -43413,10 +43424,8 @@ components:
                 trend:
                     type: string
                     description: |-
-                        Forecast trend direction. Current values are "rising", "falling", and
-                         "stable". The seeder compares probability against the prior forecast
-                         snapshot and uses a +/-0.05 deadband: deltas above +0.05 are rising,
-                         below -0.05 are falling, and everything inside the band is stable.
+                        "rising", "falling", or "stable" versus the prior snapshot, with a
+                         +/-0.05 deadband on the probability delta.
                 priorProbability:
                     type: number
                     format: double
@@ -43433,6 +43442,7 @@ components:
                 perspectives:
                     $ref: '#/components/schemas/worldmonitor_forecast_v1_Perspectives'
                 projections:
+                    deprecated: true
                     $ref: '#/components/schemas/worldmonitor_forecast_v1_Projections'
                 caseFile:
                     $ref: '#/components/schemas/worldmonitor_forecast_v1_ForecastCase'
@@ -43440,18 +43450,22 @@ components:
                     type: number
                     format: double
                     description: |-
-                        Simulation-scoring fields — populated when the deep forecast simulation pipeline
-                         has run for this forecast's state and produced a non-zero adjustment.
-                         simulation_adjustment: raw score delta (+0.08–+0.12 positive, -0.12/-0.15 negative).
-                         sim_path_confidence: clamped [0,1] confidence of the matched sim top-path; 0 = not set.
-                         demoted_by_simulation: true when a negative adjustment crossed the 0.50 acceptance threshold.
+                        Score delta from the deep simulation pipeline: +0.08 to +0.12, or
+                         -0.12 or -0.15; 0 when it has not run.
                 simPathConfidence:
                     type: number
                     format: double
+                    description: Confidence in [0, 1] of the matched simulation top path; 0 when not set.
                 demotedBySimulation:
                     type: boolean
+                    description: True when a negative adjustment crossed the 0.50 acceptance threshold.
                 resolution:
                     $ref: '#/components/schemas/worldmonitor_forecast_v1_ResolutionSpec'
+                scoredHorizons:
+                    type: array
+                    items:
+                        type: string
+                        description: Horizons whose projection is graded.
         worldmonitor_forecast_v1_ForecastSignal:
             type: object
             properties:
@@ -43485,6 +43499,14 @@ components:
                     format: double
                 source:
                     type: string
+                internalProbability:
+                    type: number
+                    format: double
+                    description: Probability before the market blend.
+                marketBlendedProbability:
+                    type: number
+                    format: double
+                    description: Probability after the market blend and domain cap.
         worldmonitor_forecast_v1_Perspectives:
             type: object
             properties:
@@ -43500,20 +43522,16 @@ components:
                 h24:
                     type: number
                     format: double
-                    description: Projected 24-hour probability after domain-curve normalization.
                 d7:
                     type: number
                     format: double
-                    description: Projected 7-day probability after domain-curve normalization.
                 d30:
                     type: number
                     format: double
-                    description: Projected 30-day probability after domain-curve normalization.
             description: |-
-                Projections contains bounded presentation-path probabilities derived from
-                 domain curves. Market forecasts are peak-anchored, so the projected value at
-                 the forecast's own time_horizon can intentionally differ from the headline
-                 probability; non-market forecasts preserve their emitted horizon as anchor.
+                Deprecated (#8967): newly seeded payloads omit it; a payload cached
+                 before the change may carry it until the next seed-forecasts run. The
+                 seeder keeps these unscored horizon curves internal for horizon scoring.
         worldmonitor_forecast_v1_ForecastCase:
             type: object
             properties:
@@ -43671,25 +43689,11 @@ components:
                 question:
                     type: string
             description: |-
-                Machine-checkable resolution spec — makes a forecast a scoreable *bet*.
-                 Every forecast carries exactly one spec, either "hard" or "judged":
-                   - "hard":   auto-resolvable by a free metric comparison against a
-                               WorldMonitor feed the detector already scored from. Sets
-                               metric_key (feed + path expression), operator, threshold,
-                               window, and source_feed (a RESOLUTION_FEED_KEYS allowlist
-                               member). baseline_value is set only when operator is
-                               "crosses" (the emission-time metric value the move is
-                               measured from).
-                   - "judged": resolved by a later LLM judge against the question string;
-                               no numeric threshold, but still a resolution deadline.
-                 kind and operator are strings, not proto enums, mirroring the trend field
-                 above so a new operator/kind never requires a proto migration to land in
-                 the 45-day history. Current kind values are "hard" and "judged"; current
-                 operator values are ">=", "<=", and "crosses".
-                 kind and deadline are always set; every other field is optional and absent
-                 (persisted as JSON null) when it does not apply to the kind — a judged spec
-                 carries no threshold/baseline_value so "no threshold" is never confused
-                 with a real threshold of 0, and a hard spec carries no question.
+                Resolution spec that makes a forecast scoreable. kind is "hard" (resolved by
+                 comparing metric_key from source_feed to threshold with operator ">=", "<="
+                 or "crosses") or "judged" (an LLM judge answers question). kind and deadline
+                 are always set; other fields apply per kind. baseline_value applies only to
+                 "crosses" specs. A judged spec's threshold is absent, never 0.
         worldmonitor_forecast_v1_GetForecastScorecardRequest:
             type: object
         worldmonitor_forecast_v1_GetForecastScorecardResponse:
@@ -43733,6 +43737,24 @@ components:
                     type: string
                 skill:
                     $ref: '#/components/schemas/worldmonitor_forecast_v1_ScorecardSkill'
+                publishedByDomain:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/worldmonitor_forecast_v1_ScorecardPublishedDomain'
+                uncertainty:
+                    $ref: '#/components/schemas/worldmonitor_forecast_v1_ScorecardUncertainty'
+                funnel:
+                    $ref: '#/components/schemas/worldmonitor_forecast_v1_ScorecardFunnel'
+                receipts:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/worldmonitor_forecast_v1_ScorecardReceipt'
+                marketAlerts:
+                    $ref: '#/components/schemas/worldmonitor_forecast_v1_MarketAlertScorecard'
+                familyOutcomes:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/worldmonitor_forecast_v1_ScorecardFamilyOutcome'
         worldmonitor_forecast_v1_ScorecardTotals:
             type: object
             properties:
@@ -43875,21 +43897,196 @@ components:
                     type: array
                     items:
                         type: string
+                yesCount:
+                    type: integer
+                    format: int32
             description: |-
-                Headline "real skill" summary: Brier/log score over scored entries whose
-                 generation origin is NOT synthetic backfill or an unpromoted shadow stream.
-                 count 0 with excluded_scored > 0 means the headline is unmeasurable because
-                 everything scored was synthetic — the honest signal for a collapsed funnel.
+                Headline Brier/log score over scored entries that are neither synthetic
+                 backfill nor unpromoted shadow streams; count 0 with excluded_scored > 0
+                 means every scored entry was excluded.
+        worldmonitor_forecast_v1_ScorecardPublishedDomain:
+            type: object
+            properties:
+                domain:
+                    type: string
+                count:
+                    type: integer
+                    format: int32
+                brier:
+                    type: number
+                    format: double
+                yesCount:
+                    type: integer
+                    format: int32
+        worldmonitor_forecast_v1_ScorecardUncertainty:
+            type: object
+            properties:
+                method:
+                    type: string
+                overallBrier:
+                    $ref: '#/components/schemas/worldmonitor_forecast_v1_ScorecardInterval'
+                skillBrier:
+                    $ref: '#/components/schemas/worldmonitor_forecast_v1_ScorecardInterval'
+        worldmonitor_forecast_v1_ScorecardInterval:
+            type: object
+            properties:
+                count:
+                    type: integer
+                    format: int32
+                mean:
+                    type: number
+                    format: double
+                ci95:
+                    type: array
+                    items:
+                        type: number
+                        format: double
+                        description: '[low, high] at 95%.'
+                insufficientSample:
+                    type: boolean
+                    description: True when count is under 30.
+            description: Bootstrap interval on a mean Brier score.
+        worldmonitor_forecast_v1_ScorecardFunnel:
+            type: object
+            properties:
+                matured:
+                    type: integer
+                    format: int32
+                immature:
+                    type: integer
+                    format: int32
+                maturityUnknown:
+                    type: integer
+                    format: int32
+                resolved:
+                    type: integer
+                    format: int32
+                scored:
+                    type: integer
+                    format: int32
+                pendingHardMatured:
+                    type: integer
+                    format: int32
+                pendingJudgeMatured:
+                    type: integer
+                    format: int32
+                resolvedOfMatured:
+                    $ref: '#/components/schemas/worldmonitor_forecast_v1_ScorecardProportion'
+                scoredOfMatured:
+                    $ref: '#/components/schemas/worldmonitor_forecast_v1_ScorecardProportion'
+            description: Matured means past deadline or resolved.
+        worldmonitor_forecast_v1_ScorecardProportion:
+            type: object
+            properties:
+                count:
+                    type: integer
+                    format: int32
+                successes:
+                    type: integer
+                    format: int32
+                rate:
+                    type: number
+                    format: double
+                ci95:
+                    type: array
+                    items:
+                        type: number
+                        format: double
+                        description: '[low, high] at 95%.'
+            description: successes of count, with a Wilson interval.
+        worldmonitor_forecast_v1_ScorecardReceipt:
+            type: object
+            properties:
+                question:
+                    type: string
+                forecastAt:
+                    type: integer
+                    format: int64
+                    description: 'Warning: Values > 2^53 may lose precision in JavaScript'
+                probability:
+                    type: number
+                    format: double
+                outcome:
+                    type: string
+                resolvedAt:
+                    type: integer
+                    format: int64
+                    description: 'Warning: Values > 2^53 may lose precision in JavaScript'
+                voidReason:
+                    type: string
+                sourceFeed:
+                    type: string
+                observedValue:
+                    type: number
+                    format: double
+                citationTitle:
+                    type: string
+                citationUrl:
+                    type: string
+        worldmonitor_forecast_v1_MarketAlertScorecard:
+            type: object
+            properties:
+                generatedAt:
+                    type: integer
+                    format: int64
+                    description: 'Warning: Values > 2^53 may lose precision in JavaScript'
+                windowHours:
+                    type: integer
+                    format: int32
+                rollingWindowDays:
+                    type: integer
+                    format: int32
+                methodology:
+                    type: string
+                byType:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/worldmonitor_forecast_v1_MarketAlertRow'
+            description: Rolling scorecard of the market-alert ledger.
+        worldmonitor_forecast_v1_MarketAlertRow:
+            type: object
+            properties:
+                type:
+                    type: string
+                scored:
+                    type: integer
+                    format: int32
+                    description: Alerts resolved HIT or MISS.
+                hitRate:
+                    type: number
+                    format: double
+                baseN:
+                    type: integer
+                    format: int32
+                baseHitRate:
+                    type: number
+                    format: double
+                pairedHitRate:
+                    type: number
+                    format: double
+                    description: Hit rate over the rows whose control scored; compare with base_hit_rate.
+                medianLeadTimeMs:
+                    type: integer
+                    format: int64
+                    description: 'Warning: Values > 2^53 may lose precision in JavaScript'
+            description: One market-alert type's rolling hit rate beside its base rate.
+        worldmonitor_forecast_v1_ScorecardFamilyOutcome:
+            type: object
+            properties:
+                forecastId:
+                    type: string
+                outcome:
+                    type: string
+                voidReason:
+                    type: string
         worldmonitor_forecast_v1_GetSimulationPackageRequest:
             type: object
             properties:
                 runId:
                     type: string
                     description: |-
-                        Optional run identifier. Does not select the package — the latest stored package is
-                         always returned regardless of this value. When supplied and it differs from the
-                         returned package's runId, the response `note` field is populated to warn that per-run
-                         filtering is not yet active. Reserved for Phase 3 per-run lookup.
+                        Optional run identifier. The latest package is always returned; when it
+                         differs from this value, note says so.
         worldmonitor_forecast_v1_GetSimulationPackageResponse:
             type: object
             properties:
@@ -43908,9 +44105,7 @@ components:
                     description: 'Unix timestamp in milliseconds (from Date.now()). Warning: Values > 2^53 may lose precision in JavaScript.. Warning: Values > 2^53 may lose precision in JavaScript'
                 note:
                     type: string
-                    description: |-
-                        Populated when req.runId was supplied but does not match the returned package's runId.
-                         Indicates that per-run filtering is not yet active and the latest package was returned instead.
+                    description: Set when run_id differs from the returned package's run_id.
                 error:
                     type: string
                     description: |-
@@ -43926,17 +44121,9 @@ components:
                     maxLength: 128
                     pattern: ^([0-9]{13,}-[A-Za-z0-9-]{1,64})?$
                     description: |-
-                        Filter is active for outcomes within the 24h retention window (#3734).
-                         If runId is supplied:
-                           - Hit on the by-run key → returns that outcome, processing=false.
-                           - By-run lookup returns the tombstone (worker write transiently failed) →
-                             falls through to :latest with a 'note' describing the transient failure.
-                           - No by-run match but runId is in the queue → returns processing=true.
-                           - No match anywhere → falls back to :latest with a 'note' describing
-                             expiry-or-mismatch.
-                         If runId is empty: returns :latest (existing behavior).
-                         Nonempty IDs contain an epoch in milliseconds, a hyphen and a 1-64 character
-                         alphanumeric or hyphen suffix. Maximum total length is 128 characters.
+                        Optional run ID (epoch ms, hyphen, 1-64 char suffix; max 128). Returns that
+                         run's outcome within 24h retention, processing=true while it is queued, or
+                         the latest outcome with a note. Empty returns the latest outcome.
                     example: 1789387200000-abc123
         worldmonitor_forecast_v1_GetSimulationOutcomeResponse:
             type: object
@@ -43956,11 +44143,7 @@ components:
                     description: 'Unix timestamp in milliseconds (from Date.now()). Warning: Values > 2^53 may lose precision in JavaScript.. Warning: Values > 2^53 may lose precision in JavaScript'
                 note:
                     type: string
-                    description: |-
-                        Populated when req.runId was supplied but does not match the returned outcome's runId,
-                         or when the by-run lookup returned a tombstone (Redis transient write failure).
-                         Distinguishes "your runId expired beyond 24h retention" from "by-run lookup failed
-                         (Redis transient); returned latest" so callers can react differently.
+                    description: Set when run_id was supplied but the latest outcome is returned instead.
                 error:
                     type: string
                     description: |-
@@ -43969,17 +44152,12 @@ components:
                 theaterSummariesJson:
                     type: string
                     description: |-
-                        JSON-encoded array of theater summaries for the UI (populated when found=true).
-                         Shape: Array<{ theaterId, theaterLabel, stateKind, topPaths: [{label, summary, confidence, keyActors}], dominantReactions, stabilizers, invalidators }>
-                         Parse with JSON.parse() on the client. Empty string when found=false.
+                        JSON-encoded Array<{ theaterId, theaterLabel, stateKind, topPaths: [{label,
+                         summary, confidence, keyActors}], dominantReactions, stabilizers,
+                         invalidators }>; empty when found=false.
                 processing:
                     type: boolean
-                    description: |-
-                        True when req.runId was supplied AND the runId is currently in the simulation
-                         queue (worker hasn't drained yet). Distinguishes "your run is processing"
-                         from "your run expired beyond retention" — both previously returned NOT_FOUND.
-                         Added in #3734 to prevent the 30-day demand experiment from being contaminated
-                         by the queued-vs-expired indistinguishability.
+                    description: True when the supplied runId is still queued, as opposed to expired.
                 eligibleTheaterCount:
                     type: integer
                     format: int32
@@ -44001,22 +44179,8 @@ components:
             properties:
                 clientVersion:
                     type: string
-                    description: |-
-                        Optional opaque client-version string for debugging (e.g., "claude-
-                         desktop/0.6.1", "mcp-client/0.2"). Server LOGS this with the success
-                         breadcrumb but never persists or branches on it. Present primarily so
-                         the generated client/server code has at least one field to reference
-                         (sebuf v0.11.1 emits a typecheck-broken POST client for fully-empty
-                         request messages). Safe to omit; default empty string.
-            description: |-
-                TriggerSimulationRequest enqueues a simulation task for the current
-                 SIMULATION_PACKAGE_LATEST_KEY package pointer. Usually unnecessary —
-                 outcomes auto-run on each deep-forecast cron cycle (~hourly) via
-                 enqueueSimulationTask; use only when a fresh run is needed outside that
-                 cadence. Caller-supplied run_id is intentionally absent — the runId is
-                 server-derived from the package pointer (avoids lock-key collision, queue
-                 stuffing, and race against cron rotation). See #3734 / docs/plans/2026-05-18-003-
-                 feat-simulation-trigger-and-runid-filter-plan.md D1.
+                    description: Optional client version, such as "mcp-client/0.2". Logged, never stored.
+            description: TriggerSimulationRequest enqueues a run for the current simulation package.
         worldmonitor_forecast_v1_TriggerSimulationResponse:
             type: object
             properties:
@@ -44033,28 +44197,16 @@ components:
                 pkgFingerprint:
                     type: string
                     description: |-
-                        Opaque fingerprint of the simulation package input (first 16 hex
-                         chars of sha256 over the package's R2 object key). Stable identifier
-                         for drift detection across trigger/read calls — clients can compare
-                         this against the fingerprint inside the by-run outcome payload to
-                         detect cron rotation. Do NOT decode. Returns empty string when
-                         reason='no_package'.
+                        Opaque fingerprint of the package key; it changes when the key changes.
+                         Empty when reason='no_package'.
                 reason:
                     type: string
                     description: |-
-                        External reason taxonomy:
-                           ''                  - happy path (queued=true)
-                           'no_package'        - SIMULATION_PACKAGE_LATEST_KEY pointer absent
-                           'already-handled'   - idempotency hit (covers both "already queued"
-                                                 and "already completed this cycle"; collapsed
-                                                 externally to avoid a cron-timing oracle —
-                                                 server logs retain the distinction).
+                        '' when queued, 'no_package' when no package exists, or 'already-handled'
+                         when this cycle's run is already queued or done.
             description: |-
-                TriggerSimulationResponse carries the outcome of an enqueue attempt.
-                 On error states (premium gate, queue capacity, Redis transport), the
-                 handler throws ApiError with the appropriate HTTP status — there is
-                 NO error field on this message. All paths that return this message
-                 represent HTTP 200.
+                TriggerSimulationResponse is the HTTP 200 result of an enqueue attempt.
+                 Errors return a non-200 status instead.
         worldmonitor_giving_v1_GetGivingSummaryRequest:
             type: object
             properties:
@@ -44402,11 +44554,15 @@ components:
                 lat:
                     type: number
                     format: double
-                    description: Precise latitude from source (overrides country centroid on map when non-zero).
+                    description: |-
+                        Latitude: the source's point when it gives one, otherwise the centroid of country_code.
+                         0 with lng 0 means the item has no known location.
                 lng:
                     type: number
                     format: double
-                    description: Precise longitude from source (overrides country centroid on map when non-zero).
+                    description: |-
+                        Longitude: the source's point when it gives one, otherwise the centroid of country_code.
+                         0 with lat 0 means the item has no known location.
                 cases:
                     type: integer
                     format: int32
@@ -44777,15 +44933,17 @@ components:
                     type: array
                     items:
                         type: string
-                        maxItems: 1
+                        maxItems: 100
                         description: |-
-                            One registered bootstrap key, for example insights. Omit when using tier.
-                             The repeated wire field is retained for compatibility; multiple keys are rejected.
-                    maxItems: 1
+                            Registered bootstrap keys, for example insights. Repeat the parameter for
+                             several fast/slow keys. Omit when using tier.
+                    maxItems: 100
             description: |-
-                GetBootstrapDataRequest selects a fixed tier or one registered bootstrap key.
+                GetBootstrapDataRequest selects a fixed tier or registered bootstrap keys.
                  Exactly one selector is required: use tier OR keys, never both.
-                 Empty, unknown, mixed and multi-key selectors return HTTP 400.
+                 Several keys are accepted when every key belongs to the fast or slow tier;
+                 an on-demand key must be requested alone. Empty, unknown and mixed
+                 selectors return HTTP 400.
         worldmonitor_infrastructure_v1_GetBootstrapDataResponse:
             type: object
             properties:
@@ -52035,7 +52193,7 @@ components:
                 provider:
                     type: string
                     minLength: 1
-                    description: 'LLM provider: "ollama", "groq", "openrouter"'
+                    description: 'LLM provider: "ollama", "openrouter"'
                 headlines:
                     type: array
                     items:

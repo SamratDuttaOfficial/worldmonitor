@@ -44,8 +44,6 @@ const {
 const OPENSKY_ACCOUNT_FINGERPRINT = openSkyAccountFingerprint(process.env.OPENSKY_CLIENT_ID);
 const OPENSKY_COOLDOWN_KEY = cooldownKeyForAccount(OPENSKY_ACCOUNT_FINGERPRINT);
 const {
-  GROQ_DEFAULT_MODEL,
-  GROQ_REASONING_EXTRA_BODY,
   OPENROUTER_FREE_BACKUP_MODEL,
   OPENROUTER_FREE_PRIMARY_MODEL,
   OPENROUTER_PROVIDER_ROUTING,
@@ -91,6 +89,7 @@ const {
 } = require('./_ingestion-coverage.cjs');
 const { maintainClosedMarketEquityKeys: maintainClosedMarketEquityKeysWithDeps } = require('./shared/closed-market-equity-maintenance.cjs');
 const { recordPizzintHistory } = require('./shared/pizzint-history.cjs');
+const { pizzintVenuePoint } = require('./shared/pizzint-location.cjs');
 const { getUsEquitySession, isMultiMarketEquityTradingDay } = require('./shared/market-hours.cjs');
 const { mergeLastGoodQuotes, planYahooRefresh, resolveMergedQuotesAsOf } = require('./shared/market-quote-refresh.cjs');
 // ESM module loaded via require(esm) (Node >= 22.12; relay image is node:24).
@@ -99,6 +98,7 @@ const { mergeLastGoodQuotes, planYahooRefresh, resolveMergedQuotesAsOf } = requi
 const { detectTrafficAnomaly } = require('../shared/chokepoint-traffic-anomaly.js');
 const { CHOKEPOINT_THREAT_LEVELS } = require('../shared/chokepoint-threat-levels.js');
 const { classifyVesselType } = require('../shared/ais-vessel-type.js');
+const { readTransitWindow } = require('../shared/chokepoint-transit-window.js');
 const { CORRIDOR_RISK_NAME_MAP, deriveCorridorRiskLevel } = require('../shared/corridor-risk.js');
 // AIS upstream reconnect policy: failure classification (transport | auth |
 // rate-limit), the throttle ceiling escalation, and the silence verdict. Pure and
@@ -4892,8 +4892,8 @@ function classifyCacheKey(title) {
 }
 
 // LLM provider fallback chain — mirrors seed-insights.mjs LLM_PROVIDERS
-// Order mirrors server/_shared/llm.ts: paid OpenRouter, two fixed free
-// OpenRouter variants, then Groq.
+// Order mirrors server/_shared/llm.ts: paid OpenRouter, then two fixed free
+// OpenRouter variants.
 const CLASSIFY_LLM_PROVIDERS = [
   {
     name: 'ollama',
@@ -4941,15 +4941,6 @@ const CLASSIFY_LLM_PROVIDERS = [
     model: OPENROUTER_FREE_BACKUP_MODEL,
     headers: (key) => ({ Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://worldmonitor.app', 'X-Title': 'World Monitor', 'User-Agent': CHROME_UA }),
     extraBody: { reasoning: { enabled: false }, provider: OPENROUTER_PROVIDER_ROUTING },
-    timeout: 30000,
-  },
-  {
-    name: 'groq',
-    envKey: 'GROQ_API_KEY',
-    apiUrl: 'https://api.groq.com/openai/v1/chat/completions',
-    model: GROQ_DEFAULT_MODEL,
-    extraBody: GROQ_REASONING_EXTRA_BODY,
-    headers: (key) => ({ Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'User-Agent': CHROME_UA }),
     timeout: 30000,
   },
 ];
@@ -8066,6 +8057,57 @@ function startChokepointFlowsSeedLoop() {
 }
 
 // ─────────────────────────────────────────────────────────────
+const AU_YIELD_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const AU_YIELD_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const AU_YIELD_MAX_CONTENT_AGE_MS = 10 * AU_YIELD_REFRESH_INTERVAL_MS;
+const AU_YIELD_SEED_TIMEOUT_MS = 300_000;
+let auYieldSeedInFlight = false;
+
+async function seedAuYieldCurve() {
+  if (auYieldSeedInFlight) return;
+  auYieldSeedInFlight = true;
+  try {
+    const meta = await upstashGet('seed-meta:economic:yield-curve-au');
+    const now = Date.now();
+    const fetchedAt = Number(meta?.fetchedAt);
+    const newestItemAt = Number(meta?.newestItemAt);
+    if (fetchedAt > 0 && fetchedAt <= now && now - fetchedAt < AU_YIELD_REFRESH_INTERVAL_MS
+      && newestItemAt > 0 && newestItemAt <= now && now - newestItemAt < AU_YIELD_MAX_CONTENT_AGE_MS) {
+      const [canonical, completion] = await Promise.all([
+        upstashGet('economic:yield-curve:au:v1'),
+        upstashGet('seed-completion:economic:yield-curve-au'),
+      ]);
+      if (Number.isFinite(canonical?._seed?.fetchedAt)
+        && completion?.fetchedAt === canonical._seed.fetchedAt
+        && Number.isFinite(completion?.completedAt) && completion.completedAt >= fetchedAt) return;
+    }
+
+    await new Promise((resolve, reject) => {
+      execFile(process.execPath, [path.join(__dirname, 'seed-yield-curve-au.mjs')], {
+        env: {
+          ...process.env,
+          WM_BUNDLE_COMPLETION_META_KEY: 'seed-completion:economic:yield-curve-au',
+          BUNDLE_SECTION_TIMEOUT_MS: String(AU_YIELD_SEED_TIMEOUT_MS),
+        },
+        timeout: AU_YIELD_SEED_TIMEOUT_MS,
+        maxBuffer: 1024 * 1024,
+      }, (err, stdout, stderr) => {
+        relayLogScriptOutput('[AuYieldFallback]', stdout);
+        relayLogScriptOutput('[AuYieldFallback]', stderr);
+        if (err) return reject(err);
+        resolve();
+      });
+    });
+  } finally {
+    auYieldSeedInFlight = false;
+  }
+}
+
+function startAuYieldCurveSeedLoop() {
+  if (!UPSTASH_ENABLED) return;
+  startBootSeedLoop('AuYieldFallback', 'seed-meta:economic:yield-curve-au', AU_YIELD_CHECK_INTERVAL_MS, seedAuYieldCurve, (e) => console.warn('[AuYieldFallback] Seed error:', e?.message || e));
+}
+
 // PizzINT Seed — Pentagon Pizza Index + GDELT tensions → Redis
 // Fetches from pizzint.watch on Railway (datacenter IPs blocked
 // from Vercel Edge). Vercel handler reads from seed key only.
@@ -8304,7 +8346,12 @@ async function seedPizzint() {
       console.warn(`[PizzINT] Seed failed: ${e?.name || 'Error'}`);
       raw = null;
     }
-    const besttimeKey = raw ? '' : (process.env.BESTTIME_API_KEY_PRIVATE || '');
+    // Stale numbers and open zero/zero rows cannot supply a usable primary signal.
+    // Keep fresh closed zeros valid, as in the existing scorer/publication contract.
+    const hasPrimaryReading = raw?.data.some(d => d.data_freshness === 'fresh'
+      && Number.isFinite(d.current_popularity) && d.current_popularity >= 0
+      && (d.current_popularity > 0 || d.is_closed_now));
+    const besttimeKey = hasPrimaryReading ? '' : (process.env.BESTTIME_API_KEY_PRIVATE || '');
     const fallback = besttimeKey ? await fetchPizzintBestTimeLocations(besttimeKey) : null;
     if (!raw && !fallback) return;
 
@@ -8323,8 +8370,7 @@ async function seedPizzint() {
       recordedAt: d.recorded_at || '',
       dataFreshness: d.data_freshness === 'fresh' ? 'DATA_FRESHNESS_FRESH' : 'DATA_FRESHNESS_STALE',
       isClosedNow: !!d.is_closed_now,
-      lat: d.lat ?? 0,
-      lng: d.lng ?? 0,
+      ...(pizzintVenuePoint(d) ?? { lat: 0, lng: 0 }),
     }));
 
     const previous = await envelopeRead(PIZZINT_REDIS_KEY);
@@ -10002,18 +10048,11 @@ setInterval(() => {
 
 async function seedChokepointTransits() {
   const now = Date.now();
+  const window = await readTransitWindow(chokepointCrossings, now, upstashEval);
   const transits = {};
   for (const cp of CHOKEPOINTS) {
-    const crossings = chokepointCrossings.get(cp.name) || [];
-    const recent = crossings.filter(c => now - c.ts < TRANSIT_WINDOW_MS);
-    chokepointCrossings.set(cp.name, recent);
-    // `available` is the same signal seedTransitSummaries encodes by leaving
-    // todayTotal null. Both writers read this one in-memory map and both ship
-    // in a single get-chokepoint-status bundle, so without it one response
-    // carried summaries.suez.todayTotal === null next to
-    // transits["Suez Canal"].total === 0 and an agent's answer depended on
-    // which half it read. The counts stay numeric here because the documented
-    // shape of this key is {tanker, cargo, other, total}.
+    const recent = window.get(cp.name) || [];
+    // An empty observed window cannot establish zero traffic.
     transits[cp.name] = {
       tanker: recent.filter(c => c.type === 'tanker').length,
       cargo: recent.filter(c => c.type === 'cargo').length,
@@ -10022,10 +10061,15 @@ async function seedChokepointTransits() {
       available: recent.length > 0,
     };
   }
-  const payload = { transits, fetchedAt: now };
-  await envelopeWrite(CHOKEPOINT_TRANSIT_KEY, payload, CHOKEPOINT_TRANSIT_TTL, { recordCount: Object.keys(transits).length, sourceVersion: 'chokepoint-transits' });
-  await upstashSet('seed-meta:supply_chain:chokepoint_transits', { fetchedAt: now, recordCount: Object.keys(transits).length }, 604800);
-  console.log(`[Transit] Seeded ${Object.keys(transits).length} chokepoint transit counts`);
+  const canonical = Object.entries(RELAY_NAME_TO_ID).filter(([, id]) => id);
+  const missing = canonical.filter(([name]) => !transits[name].available).map(([, id]) => id);
+  const covered = canonical.length - missing.length;
+  const transitCoverage = { covered, total: canonical.length, missing };
+  const payload = { transits, transitCoverage, fetchedAt: now };
+  const ok = await envelopeWrite(CHOKEPOINT_TRANSIT_KEY, payload, CHOKEPOINT_TRANSIT_TTL, { recordCount: covered, sourceVersion: 'chokepoint-transits' });
+  if (!ok) throw new Error('Transit count publication failed');
+  await upstashSet('seed-meta:supply_chain:chokepoint_transits', { fetchedAt: now, recordCount: covered, transitCoverage }, 604800);
+  console.log(`[Transit] Seeded ${covered}/${canonical.length} measured chokepoints (missing: ${missing.join(', ')})`);
 }
 
 /**
@@ -10111,6 +10155,7 @@ async function seedTransitSummaries() {
 
   const now = Date.now();
   const summaries = {};
+  const window = await readTransitWindow(chokepointCrossings, now, upstashEval);
   // Iterate the canonical chokepoint ID set rather than whatever pw happens to
   // carry today. If seed-portwatch dropped 3 of 13 (flaky ArcGIS), those 3
   // would otherwise vanish from summaries and the RPC would render zero-state
@@ -10139,8 +10184,7 @@ async function seedTransitSummaries() {
     let relayTransit = null;
     for (const [relayName, canonicalId] of Object.entries(RELAY_NAME_TO_ID)) {
       if (canonicalId === cpId) {
-        const crossings = chokepointCrossings.get(relayName) || [];
-        const recent = crossings.filter(c => now - c.ts < TRANSIT_WINDOW_MS);
+        const recent = window.get(relayName) || [];
         if (recent.length > 0) {
           relayTransit = {
             tanker: recent.filter(c => c.type === 'tanker').length,
@@ -10158,7 +10202,7 @@ async function seedTransitSummaries() {
     // Compact summary: no history field. Consumed by get-chokepoint-status on
     // every request, so keep it small.
     // dataAvailable is PortWatch history presence, not AIS today-counts.
-    // todayTotal comes from the in-memory 24h AIS window; an empty window is
+    // todayTotal comes from the durable 24h AIS window; an empty window is
     // unsupplied, not a published zero-traffic measurement (#7457). Leave the
     // count absent so PortWatch WoW cannot sit next to a fake 0.
     summaries[cpId] = {
@@ -11205,7 +11249,8 @@ function handleWorldBankRequest(req, res) {
       'GB.XPD.RSDV.GD.ZS': 'R&D Expenditure (% of GDP)',
       'IP.PAT.RESD': 'Patent Applications (residents)',
       'IP.PAT.NRES': 'Patent Applications (non-residents)',
-      'IP.TMK.TOTL': 'Trademark Applications',
+      'IP.TMK.RSCT': 'Trademark Applications (resident, by count)',
+      'IP.TMK.NRCT': 'Trademark Applications (nonresident, by count)',
       'TX.VAL.TECH.MF.ZS': 'High-Tech Exports (% of manufactured exports)',
       'BX.GSR.CCIS.ZS': 'ICT Service Exports (% of service exports)',
       'TM.VAL.ICTG.ZS.UN': 'ICT Goods Imports (% of total goods imports)',
@@ -11245,7 +11290,8 @@ function handleWorldBankRequest(req, res) {
     'GB.XPD.RSDV.GD.ZS': 'R&D Expenditure (% of GDP)',
     'IP.PAT.RESD': 'Patent Applications (residents)',
     'IP.PAT.NRES': 'Patent Applications (non-residents)',
-    'IP.TMK.TOTL': 'Trademark Applications',
+    'IP.TMK.RSCT': 'Trademark Applications (resident, by count)',
+    'IP.TMK.NRCT': 'Trademark Applications (nonresident, by count)',
     'TX.VAL.TECH.MF.ZS': 'High-Tech Exports (% of manufactured exports)',
     'BX.GSR.CCIS.ZS': 'ICT Service Exports (% of service exports)',
     'TM.VAL.ICTG.ZS.UN': 'ICT Goods Imports (% of total goods imports)',
@@ -15088,6 +15134,7 @@ server.listen(PORT, () => {
   startWsbTickersSeedLoop();
   startClimateNewsSeedLoop();
   startChokepointFlowsSeedLoop();
+  startAuYieldCurveSeedLoop();
   startPizzintSeedLoop();
   startDodoPriceSeedLoop();
 });

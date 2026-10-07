@@ -358,7 +358,7 @@
       "loadingIndex": "Index laden...",
       "loadingMarkets": "Voorspellingsmarkten laden...",
       "generatingBrief": "Inlichtingenoverzicht genereren...",
-      "unavailable": "AI-overzicht niet beschikbaar: configureer GROQ_API_KEY in Instellingen.",
+      "unavailable": "AI-overzicht niet beschikbaar: configureer OPENROUTER_API_KEY in Instellingen.",
       "cached": "in cache",
       "fresh": "Vers",
       "noMarkets": "Geen voorspellingsmarkten gevonden",
@@ -398,7 +398,7 @@
       "predictionMarkets": "Voorspellingsmarkten",
       "loadingMarkets": "Voorspellingsmarkten laden...",
       "infrastructure": "Blootstelling aan infrastructuur",
-      "briefUnavailable": "AI-overzicht niet beschikbaar: configureer GROQ_API_KEY in Instellingen.",
+      "briefUnavailable": "AI-overzicht niet beschikbaar: configureer OPENROUTER_API_KEY in Instellingen.",
       "cached": "in cache",
       "fresh": "Vers",
       "noMarkets": "Geen voorspellingsmarkten gevonden",
@@ -1248,7 +1248,7 @@
       "sourcesDetail": "{{active}}/{{total}} sources"
     },
     "insights": {
-      "infoTooltip": "<strong>AI-aangedreven analyse</strong><br>• <strong>World Brief</strong>: AI-samenvatting (Groq/OpenRouter)<br>• <strong>Sentiment</strong>: analyse van nieuwstoon<br>• <strong>Velocity</strong>: snel bewegende verhalen<br>• <strong>Focal Punten</strong>: correleert nieuwsentiteiten met kaartsignalen (militair, protesten, storingen)<br><em>Alleen desktop • Mogelijk gemaakt door Llama 3.3 + Focal Point-detectie</em>",
+      "infoTooltip": "<strong>AI-aangedreven analyse</strong><br>• <strong>World Brief</strong>: AI-samenvatting (OpenRouter)<br>• <strong>Sentiment</strong>: analyse van nieuwstoon<br>• <strong>Velocity</strong>: snel bewegende verhalen<br>• <strong>Focal Punten</strong>: correleert nieuwsentiteiten met kaartsignalen (militair, protesten, storingen)<br><em>Alleen desktop • Mogelijk gemaakt door Llama 3.3 + Focal Point-detectie</em>",
       "noStories": "Nog geen breaking of multi-source verhalen",
       "step": "Step {{step}}/{{total}}",
       "waitingForData": "Waiting for news data...",
@@ -1257,7 +1257,7 @@
       "generatingBrief": "Generating world brief...",
       "mapFlashLabel": "Live Event Pulse",
       "mapFlashDesc": "Flash locations on the map when breaking news arrives",
-      "aiFlowCloudLabel": "Cloud AI (Groq & OpenRouter)",
+      "aiFlowCloudLabel": "Cloud AI (OpenRouter)",
       "aiFlowCloudDesc": "Koppen naar de cloud sturen voor AI-samenvatting (aanbevolen)",
       "aiFlowBrowserLabel": "Lokaal browsermodel",
       "aiFlowBrowserDesc": "AI lokaal in uw browser uitvoeren",
@@ -1953,7 +1953,7 @@
       }
     },
     "marketImplications": {
-      "infoTooltip": "<strong>AI-marktimplicaties</strong> Door LLM gegenereerde handelssignalen afgeleid van live geopolitieke, grondstof- en macrothema's na elke voorspellingscyclus.<ul><li><strong>Richting</strong>: LONG / SHORT / HEDGE met betrouwbaarheidsrating</li><li><strong>Periode</strong>: 1W, 2W, 1M of 3M horizon</li><li><strong>Driver</strong>: Belangrijkste katalysator achter het signaal</li><li><strong>Risico</strong>: Voorbehoud of ongeldigheidsvoorwaarde</li></ul><em>Uitsluitend voor informatiedoeleinden. Geen beleggingsadvies.</em>",
+      "infoTooltip": "<strong>AI-marktimplicaties</strong> Door LLM gegenereerde handelssignalen afgeleid van live geopolitieke, grondstof- en macrothema's na elke voorspellingscyclus.<ul><li><strong>Richting</strong>: LONG / SHORT / HEDGE</li><li><strong>Periode</strong>: 1W, 2W, 1M of 3M horizon</li><li><strong>Driver</strong>: Belangrijkste katalysator achter het signaal</li><li><strong>Risico</strong>: Voorbehoud of ongeldigheidsvoorwaarde</li></ul><em>Uitsluitend voor informatiedoeleinden. Geen beleggingsadvies.</em>",
       "title": "AI-marktimplicaties",
       "directions": {
         "long": "LONG",
@@ -1966,10 +1966,72 @@
       "signals_one": "{{count}} signaal",
       "signals_other": "{{count}} signalen",
       "disclaimer": "Door AI gegenereerde handelssignalen alleen voor informatiedoeleinden. Geen beleggingsadvies. Voer altijd uw eigen onderzoek uit.",
-      "unavailable": "AI-marktimplicaties worden na elke forecastrun gegenereerd. Kom binnenkort terug."
+      "unavailable": "AI-marktimplicaties worden na elke forecastrun gegenereerd. Kom binnenkort terug.",
+      "unscored": "Narratieve scenario's, niet beoordeeld op nauwkeurigheid."
     },
     "forecast": {
-      "infoTooltip": "<strong>AI-prognoses</strong> Door AI gegenereerde waarschijnlijkheidsschattingen voor geopolitieke en economische gebeurtenissen:<ul><li>Cross-domain dekking: conflict, markten, toeleveringsketen, cyber, politiek</li><li>Elke prognose toont geschatte waarschijnlijkheid, betrouwbaarheidsniveau en tijdshorizon</li><li>Gekalibreerd tegen voorspellingsmarkt basislijnen waar beschikbaar</li></ul>Prognoses worden bijgewerkt wanneer nieuwe inlichtingssignalen binnenkomen. Filter op domein met behulp van de tabbladen hierboven."
+      "infoTooltip": "<strong>AI-prognoses</strong> Door AI gegenereerde waarschijnlijkheidsschattingen voor geopolitieke en economische gebeurtenissen:<ul><li>Cross-domain dekking: conflict, markten, toeleveringsketen, cyber, politiek</li><li>Elke prognose toont geschatte waarschijnlijkheid, betrouwbaarheidsniveau en tijdshorizon</li></ul>Prognoses worden bijgewerkt wanneer nieuwe inlichtingssignalen binnenkomen. Filter op domein met behulp van de tabbladen hierboven.",
+      "record": {
+        "label": "Staat van dienst",
+        "labelHint": "Hoe de gepubliceerde voorspellingen scoorden nadat ze waren beslist, over de laatste {{days}} dagen. Beweeg over een getal om te zien wat het betekent.",
+        "unavailable": "Momenteel niet beschikbaar",
+        "insufficient": "Nog niet genoeg beoordeelde voorspellingen",
+        "brier": "Brier-score {{score}} (n={{n}})",
+        "brierHint": "Brier-score over {{n}} beoordeelde voorspellingen: het gemiddelde kwadraat van het verschil tussen de voorspelde kans en wat er gebeurde. 0 is perfect, 0,25 is een muntworp, lager is beter.",
+        "baseRate": "Basispercentage {{score}} (n={{n}})",
+        "baseRateHint": "Wat iemand die altijd het waargenomen ja-percentage antwoordt zou hebben gescoord op dezelfde {{n}} voorspellingen ({{pct}}% eindigde op ja). Beter scoren betekent dat de voorspellingen informatie toevoegen.",
+        "void": "Ongeldig {{pct}}% ({{count}} van {{resolved}})",
+        "voidHint": "Besliste voorspellingen die niet beoordeeld konden worden, van de {{resolved}} besliste in de periode.",
+        "stale": "Verouderd",
+        "staleHint": "Laatst beoordeeld op {{date}}. De beoordelaar heeft sindsdien niet gedraaid, dus deze cijfers zijn ouder dan ze zouden moeten zijn.",
+        "fullRecord": "Volledige staat van dienst"
+      },
+      "reliability": {
+        "measured": "{{domain}} n={{n}} · Brier {{score}} vs basisratio {{base}}",
+        "measuredHint": "Hoe gepubliceerde {{domain}}-prognoses hebben gescoord over {{n}} geclassificeerde prognoses in de afgelopen {{days}} dagen. Het basispercentage is wat je zou scoren door altijd het waargenomen ja-percentage van het domein te antwoorden. Lager is beter. Dit is het record van het domein, niet van deze prognose.",
+        "unmeasured": "Nog niet gemeten",
+        "unmeasuredHint": "{{domain}} voorspellingen hebben {{n}} beoordeelde resultaten in de afgelopen {{days}} dagen. Een domein heeft minimaal {{min}} nodig voordat de nauwkeurigheid wordt weergegeven."
+      },
+      "resolution": {
+        "last": "Laatste: {{outcome}}",
+        "lastSr": "Het vorige venster van deze voorspelling is beslist als {{outcome}}.",
+        "history": "Recente vensters, nieuwste eerst: {{list}}",
+        "outcome": {
+          "yes": "JA",
+          "no": "NEE",
+          "void": "ONGELDIG"
+        },
+        "void": {
+          "no_establishable_metric": "De feed had geen waarde voor deze vraag",
+          "value_source_never_settled": "De feed heeft nooit een vastgestelde waarde gepubliceerd",
+          "count_source_window_not_retained": "De feed bewaarde het vraagvenster niet meer",
+          "unsupported_window": "De vraag kon niet tegen de feed worden gecontroleerd",
+          "unsupported_metric_key": "De vraag kon niet tegen de feed worden gecontroleerd",
+          "not_hard_spec": "De vraag kon niet tegen de feed worden gecontroleerd",
+          "missing_threshold": "De vraag miste een drempel",
+          "missing_deadline": "De vraag miste een deadline",
+          "missing_generated_at": "De voorspelling miste de startdatum",
+          "beyond_archive_horizon": "Het nieuwsarchief dekte het vraagvenster niet meer",
+          "no_archive_evidence": "Het nieuwsarchief had niets over het onderwerp",
+          "all_judges_void": "Beide beoordelaars vonden het bewijs onvoldoende",
+          "judge_disagreement": "De beoordelaars waren het niet eens",
+          "judge_retry_exhausted": "De beoordelaars gaven geen uitspraak",
+          "withheld_unpublished": "Dit soort voorspelling wordt niet meer gepubliceerd",
+          "resolver_envelope_bug": "Beoordeeld tegen een datafeed die we niet correct konden lezen",
+          "market_price_not_outcome": "De feed toonde de marktprijs, niet hoe de markt is afgewikkeld",
+          "judged_evidence_unreliable": "Buiten de score gehouden zolang het bewijs voor de beoordelaars wordt hersteld",
+          "other": "Kon niet worden beslist"
+        }
+      },
+      "horizons": {
+        "label": "Ook gescoord op: {{list}}",
+        "hint": "De kans in de kop wordt beoordeeld op de eigen horizon van de prognose. De projectie op elk van deze horizons wordt ook beoordeeld, tegen de bronfeed, met de waarde die voor deze prognose eerst is gepubliceerd. Projectiewaarden worden niet weergegeven omdat de huidige waarde kan afwijken van de beoordeelde waarde."
+      },
+      "audit": {
+        "label": "Nauwkeurigheid wordt geaudit",
+        "hint": "Wordt sinds {{date}} geaudit. Een audit vond fouten in de manier waarop voorspellingen werden gescoord. De scores zijn ingetrokken terwijl correcties worden doorgevoerd. Voorspellingen worden nog steeds gepubliceerd en vastgelegd.",
+        "unverified": "Vastgelegde uitkomst, niet geverifieerd zolang de nauwkeurigheid wordt geaudit."
+      }
     },
     "escalationCorrelation": {
       "infoTooltip": "<strong>Escalatie Monitor</strong> Detecteert convergerende geopolitieke signalen:<ul><li>Correleert militaire bewegingen, conflictgebeurtenissen en nieuwspieken</li><li>Scores convergentiezones op ernst (kritiek/hoog/gemiddeld/laag)</li><li>Volgt escalatie- of de-escalatietrends in de tijd</li></ul>Klik op een kaart om naar de regio op de kaart in te zoomen."
@@ -2973,8 +3035,8 @@
   "signals": {
     "context": {
       "prediction_leads_news": {
-        "whyItMatters": "Voorspellingsmarkten prijzen informatie vaak in voordat het nieuws wordt -- handelaren hebben mogelijk vroege toegang tot ontwikkelingen.",
-        "actionableInsight": "Monitor op breaking news in de komende 1-6 uur die de marktbeweging kan verklaren.",
+        "whyItMatters": "Een voorspellingsmarkt bewoog terwijl de nieuwsberichtgeving over het onderwerp laag bleef — de markt reageert mogelijk op informatie die nog niet is gerapporteerd.",
+        "actionableInsight": "Let op actueel nieuws dat de marktbeweging kan verklaren.",
         "confidenceNote": "Hogere betrouwbaarheid als meerdere voorspellingsmarkten in dezelfde richting bewegen."
       },
       "news_leads_markets": {
@@ -3244,7 +3306,7 @@
     "predictionMarkets": "Voorspellingsmarkten",
     "loadingMarkets": "Voorspellingsmarkten laden...",
     "infrastructure": "Blootstelling aan infrastructuur",
-    "briefUnavailable": "AI-overzicht niet beschikbaar — configureer GROQ_API_KEY in Instellingen.",
+    "briefUnavailable": "AI-overzicht niet beschikbaar — configureer OPENROUTER_API_KEY in Instellingen.",
     "cached": "In cache",
     "fresh": "Vers",
     "noMarkets": "Geen voorspellingsmarkten gevonden",
@@ -3314,6 +3376,7 @@
       "suppliers": "Arms suppliers ({{start}}–{{end}})",
       "source": "Sources: World Bank and SIPRI Arms Transfers Database. TIV measures transfer volume, not financial value.",
       "sourceWorldBank": "Source: World Bank.",
+      "snapshotAssembled": "Momentopname van {{source}} samengesteld op {{time}}",
       "unavailable": "Not available",
       "coverage": "Mapped coverage",
       "supplierRetained": "Supplier data retained from the last successful importer refresh."
@@ -3353,6 +3416,7 @@
       "doNotTravel": "Niet reizen",
       "reconsiderTravel": "Reis heroverwegen",
       "exerciseCaution": "Wees voorzichtig",
+      "normalPrecautions": "Gebruikelijke voorzorgsmaatregelen",
       "advisory": "Reisadvies",
       "activeSirens": "Actieve sirenes",
       "sirens24h": "Sirenes / 24u",
